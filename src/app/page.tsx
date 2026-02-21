@@ -114,32 +114,61 @@ function MapEngine() {
     uploadPulse();
   }, [isRecording, audioBlob, peakEnergy]);
 
-  const handlePlayPulse = (pulse: Pulse) => {
+  const handlePlayPulse = async (pulse: Pulse) => {
     setActivePulse(pulse);
-    if (currentAudioElement.current) currentAudioElement.current.pause();
 
-    const audio = new Audio(pulse.audio_url);
-    currentAudioElement.current = audio;
+    try {
+      // Initialize or Resume Audio Context (Vital for Mobile Safari/Chrome)
+      if (!audioCtxRef.current) {
+        audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
+      }
+      
+      if (audioCtxRef.current.state === 'suspended') {
+        await audioCtxRef.current.resume();
+      }
 
-    if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-    
-    if (!audioSourceRef.current || audioSourceRef.current.mediaElement !== audio) {
+      // Stop and clear any currently playing audio
+      if (currentAudioElement.current) {
+        currentAudioElement.current.pause();
+        currentAudioElement.current.src = ""; 
+      }
+
+      // Create new Audio Object with CORS support for Supabase
+      const audio = new Audio();
+      audio.crossOrigin = "anonymous"; 
+      audio.src = pulse.audio_url;
+      audio.load(); 
+      currentAudioElement.current = audio;
+
+      // Re-wire Spatial Panner
       const source = audioCtxRef.current.createMediaElementSource(audio);
       const panner = audioCtxRef.current.createStereoPanner();
+      
       source.connect(panner);
       panner.connect(audioCtxRef.current.destination);
-      
-      audioSourceRef.current = source;
       pannerRef.current = panner;
-    }
 
-    if (mapRef.current && pannerRef.current) {
-      const mapCenterLng = mapRef.current.getCenter().lng;
-      pannerRef.current.pan.value = Math.max(-1, Math.min(1, (pulse.lng - mapCenterLng) * 2)); 
-    }
+      // Calculate Pan based on map position
+      if (mapRef.current) {
+        const mapCenterLng = mapRef.current.getCenter().lng;
+        const panValue = Math.max(-1, Math.min(1, (pulse.lng - mapCenterLng) * 2)); 
+        panner.pan.value = panValue;
+      }
 
-    audio.play();
-    audio.onended = () => setActivePulse(null);
+      // Execute playback with a promise check
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+        playPromise.catch(error => {
+          console.error("Playback prevented:", error);
+          audio.play(); // Fallback
+        });
+      }
+
+      audio.onended = () => setActivePulse(null);
+
+    } catch (err) {
+      console.error("Playback Error:", err);
+    }
   };
 
   const handleShare = (id: string) => {
@@ -159,7 +188,6 @@ function MapEngine() {
         attributionControl={false}
       >
         {pulses.map((pulse) => {
-          // VISUAL FADE EFFECT: Calculates exact age down to the millisecond
           const age = Date.now() - new Date(pulse.created_at).getTime();
           const lifeRemaining = Math.max(0, 1 - (age / MAX_AGE_MS));
           
@@ -168,9 +196,13 @@ function MapEngine() {
           return (
             <Marker key={pulse.id} longitude={pulse.lng} latitude={pulse.lat} anchor="center">
               <motion.div
-                onClick={(e) => { e.stopPropagation(); handlePlayPulse(pulse); }}
-                className="w-4 h-4 rounded-full bg-peaky-blood shadow-neon-blood cursor-pointer border border-black"
-                style={{ opacity: 0.1 + (lifeRemaining * 0.9) }} // Fades as time passes
+                // Use onPointerDown instead of onClick for instant mobile response
+                onPointerDown={(e) => { 
+                  e.stopPropagation(); 
+                  handlePlayPulse(pulse); 
+                }}
+                className="w-6 h-6 rounded-full bg-peaky-blood shadow-neon-blood cursor-pointer border-2 border-white"
+                style={{ opacity: 0.1 + (lifeRemaining * 0.9) }}
                 animate={{ scale: [1, 1 + pulse.energy_value * 3 * lifeRemaining, 1] }}
                 transition={{ duration: 1.5 - pulse.energy_value, repeat: Infinity, ease: "easeInOut" }}
               />
