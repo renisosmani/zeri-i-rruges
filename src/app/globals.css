@@ -1,0 +1,12 @@
+@import "tailwindcss";
+
+
+@theme {
+  --color-peaky-black: #050505;
+  --color-peaky-charcoal: #121214;
+  --color-peaky-steel: #2A2A2E;
+  --color-peaky-blood: #D41111;
+  --color-peaky-gold: #E5A91A;
+  --shadow-neon-blood: 0 0 10px rgba(212, 17, 17, 0.7), 0 0 20px rgba(212, 17, 17, 0.5);
+  --shadow-neon-gold: 0 0 10px rgba(229, 169, 26, 0.7), 0 0 20px rgba(229, 169, 26, 0.5);
+}
