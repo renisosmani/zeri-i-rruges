@@ -23,6 +23,9 @@ function MapEngine() {
   const [activePulse, setActivePulse] = useState<Pulse | null>(null);
   const [uploadStep, setUploadStep] = useState<'idle' | 'recording' | 'category' | 'uploading'>('idle');
   
+  
+  const [respectedPulses, setRespectedPulses] = useState<string[]>([]);
+  
   const mapRef = useRef<MapRef>(null);
   const searchParams = useSearchParams();
   const { isRecording, liveEnergy, peakEnergy, audioBlob, startRecording, stopRecording } = useAudioPulse();
@@ -30,6 +33,12 @@ function MapEngine() {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const pannerRef = useRef<StereoPannerNode | null>(null);
   const currentAudioElement = useRef<HTMLAudioElement | null>(null);
+
+  
+  useEffect(() => {
+    const savedRespects = JSON.parse(localStorage.getItem('respectedPulses') || '[]');
+    setRespectedPulses(savedRespects);
+  }, []);
 
   useEffect(() => {
     const fetchPulses = async () => {
@@ -110,6 +119,17 @@ function MapEngine() {
   };
 
   const handleGiveRespect = async (id: string) => {
+    
+    if (respectedPulses.includes(id)) {
+      return; 
+    }
+
+    
+    const newRespectedList = [...respectedPulses, id];
+    setRespectedPulses(newRespectedList);
+    localStorage.setItem('respectedPulses', JSON.stringify(newRespectedList));
+
+    
     const { error } = await supabase.rpc('increment_respect', { row_id: id });
     
     if (!error) {
@@ -158,7 +178,6 @@ function MapEngine() {
         playPromise.catch(() => audio.play().catch(() => {}));
       }
       
-      
       audio.onended = () => setActivePulse(null);
     } catch (err) { console.error("Playback Error:", err); }
   };
@@ -185,7 +204,15 @@ function MapEngine() {
           if (lifeRemaining === 0) return null; 
 
           const respectLevel = pulse.respect_count || 0;
-          const dynamicSize = `${16 + respectLevel * 2}px`;
+          
+          
+          const sizeIncrease = Math.min(respectLevel * 0.3, 8); 
+          const dynamicSize = `${16 + sizeIncrease}px`; 
+
+          
+          const glowIncrease = Math.min(respectLevel * 1.5, 20); 
+          const glowOpacity = 0.5 + Math.min(respectLevel * 0.02, 0.4); 
+          const dynamicGlow = `0 0 ${10 + glowIncrease}px rgba(220, 38, 38, ${glowOpacity})`;
 
           return (
             <Marker key={pulse.id} longitude={pulse.lng} latitude={pulse.lat} anchor="bottom">
@@ -203,7 +230,7 @@ function MapEngine() {
                   style={{ 
                     width: dynamicSize, 
                     height: dynamicSize,
-                    boxShadow: `0 0 ${10 + respectLevel * 6}px rgba(220, 38, 38, ${0.5 + Math.min(respectLevel * 0.1, 0.5)})`,
+                    boxShadow: dynamicGlow,
                     opacity: 0.1 + (lifeRemaining * 0.9) 
                   }}
                   animate={{ scale: [1, 1 + pulse.energy_value * 3 * lifeRemaining, 1] }}
@@ -215,33 +242,34 @@ function MapEngine() {
         })}
       </Map>
 
-      {/**/}
       <AnimatePresence>
         {activePulse && (
           <motion.div 
             initial={{ y: -50, opacity: 0 }} 
             animate={{ y: 0, opacity: 1 }} 
             exit={{ y: -50, opacity: 0 }}
-            
             className="absolute top-12 left-4 right-4 md:top-10 md:left-auto md:right-10 md:w-auto z-50 bg-peaky-charcoal/95 backdrop-blur-md border border-peaky-steel p-4 rounded-xl shadow-2xl flex items-center justify-between gap-4 text-white"
           >
-            {/**/}
             <div className="flex items-center gap-3">
               <span className="text-3xl drop-shadow-md">{activePulse.category || '💬'}</span>
               <div className="flex flex-col">
                 <span className="text-[10px] text-gray-400 font-mono tracking-widest uppercase">Duke luajtur</span>
                 <span className="text-sm font-bold flex items-center gap-1">
-                  {activePulse.respect_count || 0} <Flame size={14} className="text-orange-500" /> Respect
+                  {activePulse.respect_count || 0} <Flame size={14} className={activePulse.respect_count > 0 ? "text-orange-500" : "text-gray-500"} /> Respect
                 </span>
               </div>
             </div>
             
-            {/**/}
             <div className="flex items-center gap-2">
               <button 
                 onClick={() => handleGiveRespect(activePulse.id)}
-                className="p-3 bg-peaky-blood hover:bg-red-600 rounded-full transition-all hover:scale-110 shadow-[0_0_15px_rgba(220,38,38,0.5)]"
-                title="Jepi Zjarr!"
+                disabled={respectedPulses.includes(activePulse.id)} 
+                className={`p-3 rounded-full transition-all shadow-[0_0_15px_rgba(220,38,38,0.5)] ${
+                  respectedPulses.includes(activePulse.id) 
+                    ? 'bg-gray-600 cursor-not-allowed opacity-50' 
+                    : 'bg-peaky-blood hover:bg-red-600 hover:scale-110' 
+                }`}
+                title={respectedPulses.includes(activePulse.id) ? "Ke dhënë zjarr!" : "Jepi Zjarr!"}
               >
                 🔥
               </button>
@@ -254,7 +282,6 @@ function MapEngine() {
                 <Share2 size={16} />
               </button>
 
-              {/**/}
               <button 
                 onClick={() => {
                   if (currentAudioElement.current) {
