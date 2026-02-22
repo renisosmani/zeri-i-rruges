@@ -13,7 +13,6 @@ const MAP_STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.j
 const ALBANIA_BOUNDS: [number, number, number, number] = [18.5, 39.5, 21.5, 43.0];
 const MAX_AGE_MS = 24 * 60 * 60 * 1000; 
 
-
 const CITIES = [
   { name: 'Tirana', lat: 41.3275, lng: 19.8187 },
   { name: 'Durrësi', lat: 41.3246, lng: 19.4565 },
@@ -29,17 +28,12 @@ const CITIES = [
   { name: 'Lezha', lat: 41.7836, lng: 19.6436 }
 ];
 
-
 const PHRASES = [
-  "{city} po zien nga thashethemet... vëri veshin!",
-  "Dikush në {city} sapo lëshoi një perlë të vërtetë.",
-  "Zhurmë e madhe po vjen nga {city} tani.",
-  "E dëgjuat çfarë u tha në {city}?",
-  "{city} ka diçka shumë interesante për të thënë.",
-  "Një sekret sapo u zbulua në rrugët e {city}t.",
-  "Valë e re energjie u kap në {city}!",
-  "{city} nuk zhgënjen kurrë. Shko dëgjoje!",
-  "Mos i trego njeriu, por {city} po flet..."
+  "{city} sapo lëshoi një zë të ri. Shko dëgjoje!",
+  "Dikush në {city} ka diçka për të thënë.",
+  "Zhurmë e re nga {city}...",
+  "E dëgjove zërin e fundit në {city}?",
+  "{city} theu heshtjen sapo."
 ];
 
 type Pulse = { 
@@ -53,8 +47,8 @@ function MapEngine() {
   const [uploadStep, setUploadStep] = useState<'idle' | 'recording' | 'category' | 'uploading'>('idle');
   const [respectedPulses, setRespectedPulses] = useState<string[]>([]);
   
-  
   const [streetNews, setStreetNews] = useState<string | null>(null);
+  const prevPulsesLength = useRef(0); 
   
   const mapRef = useRef<MapRef>(null);
   const searchParams = useSearchParams();
@@ -81,39 +75,49 @@ function MapEngine() {
     };
 
     fetchPulses();
-    const interval = setInterval(fetchPulses, 60000); 
+    const interval = setInterval(fetchPulses, 15000); 
     return () => clearInterval(interval);
   }, []);
 
   
   useEffect(() => {
-    if (pulses.length === 0) return;
+    
+    if (prevPulsesLength.current === 0) {
+      prevPulsesLength.current = pulses.length;
+      return;
+    }
 
-    const generateNews = () => {
+    
+    if (pulses.length > prevPulsesLength.current) {
       
-      const randomPulse = pulses[Math.floor(Math.random() * pulses.length)];
-      
+      const newestPulse = pulses.reduce((latest, current) => 
+        new Date(latest.created_at).getTime() > new Date(current.created_at).getTime() ? latest : current
+      , pulses[0]);
+
       let nearestCity = "Diku në Shqipëri";
       let minDistance = 0.2; 
 
-      
       CITIES.forEach(city => {
-        const dist = Math.sqrt(Math.pow(city.lat - randomPulse.lat, 2) + Math.pow(city.lng - randomPulse.lng, 2));
+        const dist = Math.sqrt(Math.pow(city.lat - newestPulse.lat, 2) + Math.pow(city.lng - newestPulse.lng, 2));
         if (dist < minDistance) {
           minDistance = dist;
           nearestCity = city.name;
         }
       });
 
-      
       const randomPhrase = PHRASES[Math.floor(Math.random() * PHRASES.length)];
       setStreetNews(randomPhrase.replace("{city}", nearestCity));
-    };
 
-    generateNews();
-    const newsInterval = setInterval(generateNews, 8000); 
+      
+      const timer = setTimeout(() => {
+        setStreetNews(null);
+      }, 6000);
 
-    return () => clearInterval(newsInterval);
+      prevPulsesLength.current = pulses.length;
+      return () => clearTimeout(timer);
+    }
+    
+    prevPulsesLength.current = pulses.length;
   }, [pulses]);
 
   useEffect(() => {
@@ -168,6 +172,8 @@ function MapEngine() {
         .from('pulses').insert([newPulse]).select();
 
       if (insertError) throw insertError;
+      
+      
       if (insertData) setPulses(prev => [...prev, insertData[0]]);
       
       alert("Zëri yt u lëshua në rrugë!");
@@ -246,7 +252,7 @@ function MapEngine() {
   return (
     <main className="relative w-full h-[100dvh] bg-peaky-black overflow-hidden font-sans">
       
-      {/* */}
+      {/**/}
       <AnimatePresence mode="wait">
         {streetNews && (
           <motion.div
@@ -254,10 +260,10 @@ function MapEngine() {
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
-            transition={{ duration: 0.8 }}
-            className="absolute top-4 left-1/2 -translate-x-1/2 z-40 bg-peaky-charcoal/80 backdrop-blur-md border border-peaky-steel px-6 py-2 rounded-full shadow-[0_0_15px_rgba(255,215,0,0.1)] flex items-center gap-3 w-max max-w-[90vw]"
+            transition={{ duration: 0.5 }}
+            className="absolute top-4 left-1/2 -translate-x-1/2 z-40 bg-peaky-charcoal/90 backdrop-blur-md border border-peaky-steel px-6 py-2 rounded-full shadow-[0_0_20px_rgba(220,38,38,0.3)] flex items-center gap-3 w-max max-w-[90vw]"
           >
-            <Radio size={16} className="text-peaky-gold animate-pulse" />
+            <Radio size={16} className="text-peaky-blood animate-pulse" />
             <span className="text-white text-xs sm:text-sm font-mono tracking-wide">
               {streetNews}
             </span>
