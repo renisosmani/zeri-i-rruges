@@ -36,6 +36,13 @@ const PHRASES = [
   "{city} theu heshtjen sapo."
 ];
 
+
+const getMoodStyle = (energy: number) => {
+  if (energy >= 0.7) return { color: '#ef4444', shadowRgb: '239, 68, 68' }; 
+  if (energy >= 0.4) return { color: '#a855f7', shadowRgb: '168, 85, 247' }; 
+  return { color: '#3b82f6', shadowRgb: '59, 130, 246' }; 
+};
+
 type Pulse = { 
   id: string; lat: number; lng: number; energy_value: number; 
   audio_url: string; created_at: string; category: string; respect_count: number; 
@@ -79,17 +86,13 @@ function MapEngine() {
     return () => clearInterval(interval);
   }, []);
 
-  
   useEffect(() => {
-    
     if (prevPulsesLength.current === 0) {
       prevPulsesLength.current = pulses.length;
       return;
     }
 
-    
     if (pulses.length > prevPulsesLength.current) {
-      
       const newestPulse = pulses.reduce((latest, current) => 
         new Date(latest.created_at).getTime() > new Date(current.created_at).getTime() ? latest : current
       , pulses[0]);
@@ -108,7 +111,6 @@ function MapEngine() {
       const randomPhrase = PHRASES[Math.floor(Math.random() * PHRASES.length)];
       setStreetNews(randomPhrase.replace("{city}", nearestCity));
 
-      
       const timer = setTimeout(() => {
         setStreetNews(null);
       }, 6000);
@@ -172,7 +174,6 @@ function MapEngine() {
         .from('pulses').insert([newPulse]).select();
 
       if (insertError) throw insertError;
-      
       
       if (insertData) setPulses(prev => [...prev, insertData[0]]);
       
@@ -252,7 +253,6 @@ function MapEngine() {
   return (
     <main className="relative w-full h-[100dvh] bg-peaky-black overflow-hidden font-sans">
       
-      {/**/}
       <AnimatePresence mode="wait">
         {streetNews && (
           <motion.div
@@ -284,35 +284,68 @@ function MapEngine() {
           const lifeRemaining = Math.max(0, 1 - (age / MAX_AGE_MS));
           if (lifeRemaining === 0) return null; 
 
+          
+          const mood = getMoodStyle(pulse.energy_value);
           const respectLevel = pulse.respect_count || 0;
           const sizeIncrease = Math.min(respectLevel * 0.3, 8); 
           const dynamicSize = `${16 + sizeIncrease}px`; 
 
           const glowIncrease = Math.min(respectLevel * 1.5, 20); 
           const glowOpacity = 0.5 + Math.min(respectLevel * 0.02, 0.4); 
-          const dynamicGlow = `0 0 ${10 + glowIncrease}px rgba(220, 38, 38, ${glowOpacity})`;
+          const dynamicGlow = `0 0 ${10 + glowIncrease}px rgba(${mood.shadowRgb}, ${glowOpacity})`;
+
+          const isActive = activePulse?.id === pulse.id;
 
           return (
             <Marker key={pulse.id} longitude={pulse.lng} latitude={pulse.lat} anchor="bottom">
-              <div className="flex flex-col items-center justify-end">
+              <div className="flex flex-col items-center justify-end relative">
+                
+                {/* */}
                 <span 
-                  className="text-2xl drop-shadow-[0_0_10px_rgba(255,255,255,0.5)] z-10"
+                  className="text-2xl drop-shadow-[0_0_10px_rgba(255,255,255,0.5)] z-20 mb-2"
                   style={{ opacity: 0.3 + (lifeRemaining * 0.7) }}
                 >
                   {pulse.category || '💬'}
                 </span>
+
+                {/* */}
+                {isActive && (
+                  <div className="absolute inset-x-0 bottom-0 flex items-center justify-center pointer-events-none z-0">
+                    {[1, 2, 3].map((index) => (
+                      <motion.div
+                        key={index}
+                        className="absolute rounded-full"
+                        style={{ border: `2px solid ${mood.color}` }}
+                        initial={{ width: 10, height: 10, opacity: 0.8 }}
+                        animate={{ 
+                          width: [10, 80], 
+                          height: [10, 80], 
+                          opacity: 0 
+                        }}
+                        transition={{ 
+                          duration: 2, 
+                          repeat: Infinity, 
+                          delay: index * 0.6,
+                          ease: "easeOut" 
+                        }}
+                      />
+                    ))}
+                  </div>
+                )}
                 
+                {/* */}
                 <motion.div
                   onPointerDown={(e) => { e.stopPropagation(); handlePlayPulse(pulse); }}
-                  className="rounded-full bg-peaky-blood cursor-pointer border-2 border-white -mt-2"
+                  className="rounded-full cursor-pointer border-2 border-white z-10"
                   style={{ 
+                    backgroundColor: mood.color,
                     width: dynamicSize, 
                     height: dynamicSize,
                     boxShadow: dynamicGlow,
                     opacity: 0.1 + (lifeRemaining * 0.9) 
                   }}
-                  animate={{ scale: [1, 1 + pulse.energy_value * 3 * lifeRemaining, 1] }}
-                  transition={{ duration: 1.5 - pulse.energy_value, repeat: Infinity, ease: "easeInOut" }}
+                  animate={isActive ? { scale: [1, 1.3, 1] } : { scale: [1, 1 + pulse.energy_value * 3 * lifeRemaining, 1] }}
+                  transition={isActive ? { duration: 0.5, repeat: Infinity } : { duration: 1.5 - pulse.energy_value, repeat: Infinity, ease: "easeInOut" }}
                 />
               </div>
             </Marker>
