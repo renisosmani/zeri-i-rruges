@@ -3,8 +3,9 @@
 import { useState, useEffect, useRef, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Map, { Marker, MapRef } from 'react-map-gl/maplibre';
+import useSupercluster from 'use-supercluster';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Share2, Play, Square, Volume2, Flame } from 'lucide-react';
+import { Share2, Play, Square, X, Flame, Radio, List, Trash2, MapPin, Clock, Users, ChevronRight } from 'lucide-react'; 
 import { useAudioPulse } from '@/app/hooks/useAudioPulse';
 import { supabase } from '@/utils/supabase'; 
 import 'maplibre-gl/dist/maplibre-gl.css';
@@ -13,212 +14,190 @@ const MAP_STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.j
 const ALBANIA_BOUNDS: [number, number, number, number] = [18.5, 39.5, 21.5, 43.0];
 const MAX_AGE_MS = 24 * 60 * 60 * 1000; 
 
-type Pulse = { 
-  id: string; lat: number; lng: number; energy_value: number; 
-  audio_url: string; created_at: string; category: string; respect_count: number; 
+const CITIES = [
+  { name: 'Tiranë', lat: 41.3275, lng: 19.8187 }, { name: 'Durrës', lat: 41.3246, lng: 19.4565 },
+  { name: 'Shkodër', lat: 42.0693, lng: 19.5033 }, { name: 'Vlorë', lat: 40.4650, lng: 19.4850 },
+  { name: 'Korçë', lat: 40.6143, lng: 20.7778 }, { name: 'Elbasan', lat: 41.1102, lng: 20.0867 }
+];
+
+const getMoodStyle = (energy: number) => {
+  if (energy >= 0.7) return { color: '#ef4444', shadowRgb: '239, 68, 68' };
+  if (energy >= 0.4) return { color: '#a855f7', shadowRgb: '168, 85, 247' };
+  return { color: '#3b82f6', shadowRgb: '59, 130, 246' };
 };
+
+const getTimeAgo = (dateString: string) => {
+  const diffMins = Math.round((new Date().getTime() - new Date(dateString).getTime()) / 60000);
+  if (diffMins < 1) return 'Sapo';
+  if (diffMins < 60) return `${diffMins}m`;
+  return `${Math.floor(diffMins / 60)}h`;
+};
+
+const getNearestCity = (lat: number, lng: number) => {
+  let nearest = "Diku"; let minDistance = 0.2;
+  CITIES.forEach(c => {
+    const d = Math.sqrt(Math.pow(c.lat - lat, 2) + Math.pow(c.lng - lng, 2));
+    if (d < minDistance) { minDistance = d; nearest = c.name; }
+  });
+  return nearest;
+};
+
+type Pulse = { id: string; lat: number; lng: number; energy_value: number; audio_url: string; created_at: string; category: string; respect_count: number; };
 
 function MapEngine() {
   const [pulses, setPulses] = useState<Pulse[]>([]);
   const [activePulse, setActivePulse] = useState<Pulse | null>(null);
+  const [activeCluster, setActiveCluster] = useState<Pulse[] | null>(null);
+  
+  
+  const [bounds, setBounds] = useState<[number, number, number, number] | undefined>(undefined);
+  const [zoom, setZoom] = useState(7);
+  
+  const [audioDuration, setAudioDuration] = useState<number | null>(null);
   const [uploadStep, setUploadStep] = useState<'idle' | 'recording' | 'category' | 'uploading'>('idle');
+  const [myPulses, setMyPulses] = useState<string[]>([]); 
+  const [respectedPulses, setRespectedPulses] = useState<string[]>([]);
   
   const mapRef = useRef<MapRef>(null);
-  const searchParams = useSearchParams();
   const { isRecording, liveEnergy, peakEnergy, audioBlob, startRecording, stopRecording } = useAudioPulse();
-  
   const audioCtxRef = useRef<AudioContext | null>(null);
-  const pannerRef = useRef<StereoPannerNode | null>(null);
   const currentAudioElement = useRef<HTMLAudioElement | null>(null);
 
-  
   useEffect(() => {
+    setMyPulses(JSON.parse(localStorage.getItem('myPulses') || '[]'));
+    setRespectedPulses(JSON.parse(localStorage.getItem('respectedPulses') || '[]'));
+    
     const fetchPulses = async () => {
       const yesterday = new Date(Date.now() - MAX_AGE_MS).toISOString();
-      const { data, error } = await supabase
-        .from('pulses')
-        .select('*')
-        .gte('created_at', yesterday); 
-        
+      const { data } = await supabase.from('pulses').select('*').gte('created_at', yesterday).order('created_at', { ascending: false });
       if (data) setPulses(data);
     };
-
     fetchPulses();
-    const interval = setInterval(fetchPulses, 60000); 
+    const interval = setInterval(fetchPulses, 15000); 
     return () => clearInterval(interval);
   }, []);
 
   
-  useEffect(() => {
-    const sharedId = searchParams.get('pulse');
-    if (sharedId && pulses.length > 0) {
-      const target = pulses.find(p => p.id === sharedId);
-      if (target && mapRef.current) {
-        mapRef.current.flyTo({ center: [target.lng, target.lat], zoom: 12, duration: 2000 });
-      }
-    }
-  }, [searchParams, pulses]);
+  const points = pulses.map(pulse => ({
+    type: 'Feature' as const,
+    properties: { cluster: false, ...pulse },
+    geometry: { type: 'Point' as const, coordinates: [pulse.lng, pulse.lat] as [number, number] }
+  }));
 
-  
-  useEffect(() => {
-    if (isRecording) {
-      setUploadStep('recording');
-    } else if (uploadStep === 'recording' && audioBlob) {
-      setUploadStep('category');
-    }
-  }, [isRecording, audioBlob, uploadStep]);
+  const { clusters, supercluster } = useSupercluster({
+    points,
+    bounds,
+    zoom,
+    options: { radius: 60, maxZoom: 15 } 
+  });
 
-  
-  const handleUploadWithCategory = async (selectedCategory: string) => {
-    if (!audioBlob || peakEnergy === 0) return;
-    setUploadStep('uploading');
-    
-    try {
-      
-      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, {
-          enableHighAccuracy: true, timeout: 15000, maximumAge: 0
-        });
-      });
-
-      const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.webm`;
-      
-      
-      const { error: uploadError } = await supabase.storage
-        .from('audio_pulses')
-        .upload(fileName, audioBlob, { contentType: 'audio/webm', upsert: false });
-
-      if (uploadError) throw uploadError;
-
-      const { data: publicUrlData } = supabase.storage.from('audio_pulses').getPublicUrl(fileName);
-
-      const newPulse = {
-        lat: position.coords.latitude,
-        lng: position.coords.longitude,
-        energy_value: peakEnergy,
-        audio_url: publicUrlData.publicUrl,
-        category: selectedCategory,
-        respect_count: 0
-      };
-
-      const { data: insertData, error: insertError } = await supabase
-        .from('pulses').insert([newPulse]).select();
-
-      if (insertError) throw insertError;
-      if (insertData) setPulses(prev => [...prev, insertData[0]]);
-      
-      alert("Zëri yt u lëshua në rrugë!");
-    } catch (error: any) {
-      alert(`Gabim: ${error.message || "Ju lutem lejoni aksesin në Lokacion dhe Mikrofon!"}`);
-    } finally {
-      setUploadStep('idle');
+  const updateMapBounds = () => {
+    if (mapRef.current) {
+      const b = mapRef.current.getMap().getBounds();
+      setBounds([b.getWest(), b.getSouth(), b.getEast(), b.getNorth()]);
+      setZoom(mapRef.current.getMap().getZoom());
     }
   };
 
-  
-  const handleGiveRespect = async (id: string) => {
-    const { error } = await supabase.rpc('increment_respect', { row_id: id });
-    
-    if (!error) {
-      setPulses(prev => prev.map(p => 
-        p.id === id ? { ...p, respect_count: (p.respect_count || 0) + 1 } : p
-      ));
-      
-      if (activePulse && activePulse.id === id) {
-        setActivePulse(prev => prev ? { ...prev, respect_count: (prev.respect_count || 0) + 1 } : null);
-      }
-    }
-  };
-
-  
   const handlePlayPulse = async (pulse: Pulse) => {
-    setActivePulse(pulse);
+    setActivePulse(pulse); setAudioDuration(null);
     try {
-      
       if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
       if (audioCtxRef.current.state === 'suspended') await audioCtxRef.current.resume();
-
-      if (currentAudioElement.current) {
-        currentAudioElement.current.pause();
-        currentAudioElement.current.src = ""; 
-      }
-
+      if (currentAudioElement.current) currentAudioElement.current.pause();
       
-      const audio = new Audio();
-      audio.crossOrigin = "anonymous"; 
-      audio.src = pulse.audio_url;
-      audio.load(); 
+      const audio = new Audio(pulse.audio_url);
+      audio.crossOrigin = "anonymous";
+      audio.addEventListener('loadedmetadata', () => setAudioDuration(audio.duration));
       currentAudioElement.current = audio;
-
-      try {
-        const source = audioCtxRef.current.createMediaElementSource(audio);
-        const panner = audioCtxRef.current.createStereoPanner();
-        source.connect(panner);
-        panner.connect(audioCtxRef.current.destination);
-        pannerRef.current = panner;
-
-        if (mapRef.current) {
-          const mapCenterLng = mapRef.current.getCenter().lng;
-          panner.pan.value = Math.max(-1, Math.min(1, (pulse.lng - mapCenterLng) * 2)); 
-        }
-      } catch (e) { console.warn("Efekti 3D dështoi, po luajmë zërin normalisht.", e); }
-
-      const playPromise = audio.play();
-      if (playPromise !== undefined) {
-        playPromise.catch(() => audio.play().catch(() => {}));
-      }
+      audio.play();
       audio.onended = () => setActivePulse(null);
-    } catch (err) { console.error("Playback Error:", err); }
+    } catch (err) { console.error(err); }
   };
 
-  const handleShare = (id: string) => {
-    const url = `${window.location.origin}?pulse=${id}`;
-    navigator.clipboard.writeText(url);
-    alert("Linku i Pulsit u kopjua! Dërgoja miqve.");
+  const handleUploadWithCategory = async (cat: string) => {
+    if (!audioBlob || peakEnergy === 0) return;
+    setUploadStep('uploading');
+    try {
+      const pos = await new Promise<GeolocationPosition>((res, rej) => navigator.geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: true }));
+      const fileName = `${Date.now()}.webm`;
+      await supabase.storage.from('audio_pulses').upload(fileName, audioBlob, { contentType: 'audio/webm' });
+      const { data: url } = supabase.storage.from('audio_pulses').getPublicUrl(fileName);
+      const { data } = await supabase.from('pulses').insert([{ lat: pos.coords.latitude, lng: pos.coords.longitude, energy_value: peakEnergy, audio_url: url.publicUrl, category: cat, respect_count: 0 }]).select();
+      
+      if (data) {
+        setPulses(prev => [data[0], ...prev]);
+        const newMyPulses = [...myPulses, data[0].id];
+        setMyPulses(newMyPulses); localStorage.setItem('myPulses', JSON.stringify(newMyPulses));
+      }
+    } catch (e) { alert("Gabim në ngarkim!"); }
+    setUploadStep('idle');
+  };
+
+  const handleGiveRespect = async (id: string) => {
+    if (respectedPulses.includes(id)) return;
+    const newRespectedList = [...respectedPulses, id];
+    setRespectedPulses(newRespectedList); localStorage.setItem('respectedPulses', JSON.stringify(newRespectedList));
+    const { error } = await supabase.rpc('increment_respect', { row_id: id });
+    if (!error) {
+      setPulses(prev => prev.map(p => p.id === id ? { ...p, respect_count: (p.respect_count || 0) + 1 } : p));
+      if (activePulse?.id === id) setActivePulse(prev => prev ? { ...prev, respect_count: (prev.respect_count || 0) + 1 } : null);
+      if (activeCluster) setActiveCluster(prev => prev ? prev.map(p => p.id === id ? { ...p, respect_count: (p.respect_count || 0) + 1 } : p) : null);
+    }
   };
 
   return (
-    <main className="relative w-full h-[100dvh] bg-peaky-black overflow-hidden font-sans">
-      <Map
-        ref={mapRef}
-        initialViewState={{ longitude: 20.1683, latitude: 41.1533, zoom: 7, pitch: 45 }}
-        maxBounds={ALBANIA_BOUNDS}
-        minZoom={6}
-        mapStyle={MAP_STYLE}
-        attributionControl={false}
-      >
-        {pulses.map((pulse) => {
-          const age = Date.now() - new Date(pulse.created_at).getTime();
-          const lifeRemaining = Math.max(0, 1 - (age / MAX_AGE_MS));
-          if (lifeRemaining === 0) return null; 
+    <main className="relative w-full h-[100dvh] bg-peaky-black overflow-hidden font-sans select-none">
+      
+      <Map ref={mapRef} initialViewState={{ longitude: 20.1683, latitude: 41.1533, zoom: 7, pitch: 45 }} 
+           maxBounds={ALBANIA_BOUNDS} mapStyle={MAP_STYLE} attributionControl={false}
+           onMove={updateMapBounds} onLoad={updateMapBounds}>
+        
+        {clusters.map(cluster => {
+          const [longitude, latitude] = cluster.geometry.coordinates;
+          const { cluster: isCluster, point_count: pointCount } = cluster.properties as any;
+
+          if (isCluster) {
+            return (
+              <Marker key={`cluster-${cluster.id}`} longitude={longitude} latitude={latitude}>
+                <motion.div 
+                  onClick={() => {
+                    
+                    const leaves = supercluster?.getLeaves(cluster.id as number, Infinity) || [];
+                    setActiveCluster(leaves.map(l => l.properties as Pulse).sort((a,b) => b.respect_count - a.respect_count));
+                  }}
+                  className="relative flex items-center justify-center cursor-pointer group"
+                  initial={{ scale: 0 }} animate={{ scale: 1 }}
+                >
+                  <div className="absolute inset-0 bg-peaky-blood/30 rounded-full animate-ping" style={{ padding: `${20 + (pointCount * 2)}px` }} />
+                  <div className="relative z-10 bg-peaky-charcoal border-2 border-peaky-blood shadow-[0_0_30px_rgba(220,38,38,0.6)] rounded-full flex flex-col items-center justify-center text-white"
+                       style={{ width: `${40 + (pointCount * 2)}px`, height: `${40 + (pointCount * 2)}px` }}>
+                    <Users size={16} className="text-peaky-gold mb-1" />
+                    <span className="font-bold text-sm leading-none">{pointCount}</span>
+                  </div>
+                </motion.div>
+              </Marker>
+            );
+          }
+
+          const pulse = cluster.properties as Pulse;
+          const mood = getMoodStyle(pulse.energy_value);
+          const size = `${16 + Math.min(pulse.respect_count * 0.3, 8)}px`;
 
           
-          const respectLevel = pulse.respect_count || 0;
-          const dynamicSize = `${16 + respectLevel * 2}px`; 
-
           return (
-            <Marker key={pulse.id} longitude={pulse.lng} latitude={pulse.lat} anchor="bottom">
-              <div className="flex flex-col items-center justify-end">
-                <span 
-                  className="text-2xl drop-shadow-[0_0_10px_rgba(255,255,255,0.5)] z-10"
-                  style={{ opacity: 0.3 + (lifeRemaining * 0.7) }}
-                >
-                  {pulse.category || '💬'}
-                </span>
-                
-                <motion.div
-                  
-                  onPointerDown={(e) => { e.stopPropagation(); handlePlayPulse(pulse); }}
-                  className="rounded-full bg-peaky-blood cursor-pointer border-2 border-white -mt-2"
-                  style={{ 
-                    width: dynamicSize, 
-                    height: dynamicSize,
-                    boxShadow: `0 0 ${10 + respectLevel * 6}px rgba(220, 38, 38, ${0.5 + Math.min(respectLevel * 0.1, 0.5)})`,
-                    opacity: 0.1 + (lifeRemaining * 0.9) 
-                  }}
-                  animate={{ scale: [1, 1 + pulse.energy_value * 3 * lifeRemaining, 1] }}
-                  transition={{ duration: 1.5 - pulse.energy_value, repeat: Infinity, ease: "easeInOut" }}
-                />
+            <Marker key={pulse.id} longitude={longitude} latitude={latitude} anchor="bottom">
+              <div className="flex flex-col items-center relative cursor-pointer" onClick={() => handlePlayPulse(pulse)}>
+                <span className="text-2xl mb-1">{pulse.category}</span>
+                {activePulse?.id === pulse.id && (
+                   <div className="absolute bottom-0 flex items-center justify-center pointer-events-none">
+                    {[1, 2].map(i => (
+                      <motion.div key={i} className="absolute rounded-full border-2" style={{ borderColor: mood.color }}
+                        initial={{ width: 10, height: 10, opacity: 1 }} animate={{ width: 60, height: 60, opacity: 0 }} transition={{ duration: 1.5, repeat: Infinity, delay: i*0.5 }} />
+                    ))}
+                   </div>
+                )}
+                <div className="rounded-full border-2 border-white" style={{ backgroundColor: mood.color, width: size, height: size, boxShadow: `0 0 15px ${mood.color}` }} />
               </div>
             </Marker>
           );
@@ -226,94 +205,85 @@ function MapEngine() {
       </Map>
 
       <AnimatePresence>
-        {activePulse && (
-          <motion.div 
-            initial={{ y: 100, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 100, opacity: 0 }}
-            className="absolute top-safe right-4 md:top-10 md:right-10 z-20 bg-peaky-charcoal border border-peaky-steel p-4 rounded-xl shadow-2xl flex items-center gap-4 text-white mt-4"
-          >
-            <span className="text-2xl">{activePulse.category || '💬'}</span>
-            <div className="flex flex-col flex-1 min-w-[120px]">
-              <span className="text-xs text-gray-400 font-mono tracking-widest uppercase">Duke luajtur</span>
-              <span className="text-sm font-bold flex items-center gap-1">
-                {activePulse.respect_count || 0} <Flame size={14} className="text-orange-500" /> Respect
-              </span>
-            </div>
+        {activeCluster && activeCluster.length > 0 && (
+          <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+            className="absolute bottom-0 left-0 right-0 md:left-auto md:right-10 md:bottom-10 md:w-96 md:rounded-3xl z-50 bg-peaky-charcoal/95 backdrop-blur-2xl border-t md:border border-peaky-steel shadow-[0_-10px_40px_rgba(0,0,0,0.8)] flex flex-col max-h-[70vh] rounded-t-3xl overflow-hidden">
             
-            <button 
-              onClick={() => handleGiveRespect(activePulse.id)}
-              className="p-3 bg-peaky-blood hover:bg-red-600 rounded-full transition-all hover:scale-110 shadow-[0_0_15px_rgba(220,38,38,0.5)]"
-              title="Jepi Zjarr!"
-            >
-              🔥
-            </button>
+            <div className="p-5 border-b border-peaky-steel/50 flex justify-between items-center bg-black/20">
+              <div className="flex flex-col">
+                <span className="flex items-center gap-2 text-peaky-gold text-xs font-mono uppercase tracking-widest"><Radio size={12} className="animate-pulse"/> Lagjja Live</span>
+                {/* */}
+                <h2 className="text-white text-xl font-bold flex items-center gap-2 mt-1">
+                  <MapPin size={18} className="text-peaky-blood"/> {activeCluster[0] ? getNearestCity(activeCluster[0].lat, activeCluster[0].lng) : 'Diku'}
+                </h2>
+              </div>
+              <button onClick={() => setActiveCluster(null)} className="p-2 bg-gray-800 rounded-full text-gray-400 hover:text-white"><X size={20}/></button>
+            </div>
 
-            <button onClick={() => handleShare(activePulse.id)} className="p-3 bg-peaky-steel hover:bg-peaky-gold hover:text-black rounded-full transition-colors">
-              <Share2 size={16} />
-            </button>
+            <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+              {activeCluster.map((p, index) => {
+                const isKing = index === 0 && p.respect_count > 0; 
+                const isPlaying = activePulse?.id === p.id;
+
+                return (
+                  <motion.div key={p.id} onClick={() => handlePlayPulse(p)}
+                    className={`p-4 rounded-2xl cursor-pointer transition-all border ${isPlaying ? 'bg-peaky-blood/20 border-peaky-blood' : 'bg-peaky-black/50 border-peaky-steel hover:border-peaky-gold'} flex items-center gap-4 relative overflow-hidden`}
+                  >
+                    {isKing && <div className="absolute top-0 right-0 bg-gradient-to-l from-yellow-500/20 to-transparent w-32 h-full pointer-events-none" />}
+                    
+                    <div className="relative">
+                      <span className="text-3xl drop-shadow-lg">{p.category}</span>
+                      {isKing && <span className="absolute -top-3 -right-2 text-xl drop-shadow-[0_0_10px_gold]">👑</span>}
+                    </div>
+
+                    <div className="flex-1 z-10">
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="text-[10px] text-gray-400 font-mono">{getTimeAgo(p.created_at)}</span>
+                        {isKing && <span className="text-[9px] uppercase tracking-widest text-peaky-gold font-bold bg-peaky-gold/10 px-2 py-0.5 rounded-sm">Mbreti</span>}
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <button onClick={(e) => { e.stopPropagation(); handleGiveRespect(p.id); }} className={`flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-md ${respectedPulses.includes(p.id) ? 'text-gray-500 bg-gray-800/50' : 'text-orange-400 bg-orange-500/10 hover:bg-orange-500/20'}`}>
+                          <Flame size={12}/> {p.respect_count}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center z-10 shadow-lg ${isPlaying ? 'bg-peaky-blood text-white shadow-[0_0_15px_rgba(220,38,38,0.5)]' : 'bg-gray-800 text-gray-400'}`}>
+                      {isPlaying ? <span className="animate-pulse font-mono text-xs">•••</span> : <Play size={16} className="ml-1" />}
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      <div className="absolute bottom-16 md:bottom-10 left-1/2 -translate-x-1/2 z-10 flex flex-col items-center gap-4 w-11/12 max-w-md pb-safe">
-        
-        {uploadStep === 'recording' && (
-          <div className="w-full flex flex-col items-center gap-2">
-            <span className="text-peaky-blood font-mono text-xs tracking-widest uppercase animate-pulse">Duke Regjistruar...</span>
-            <div className="w-full h-2 bg-peaky-charcoal rounded-full overflow-hidden">
-              <motion.div className="h-full bg-peaky-gold shadow-neon-gold" animate={{ width: `${liveEnergy * 100}%` }} transition={{ type: 'tween', duration: 0.1 }} />
+      <div className="absolute bottom-10 left-1/2 -translate-x-1/2 z-40 flex items-center gap-4 w-11/12 max-w-md">
+        <div className="flex-1 relative">
+          {isRecording && (
+            <div className="absolute -top-10 left-0 right-0 flex justify-center">
+               <motion.div className="h-1 bg-peaky-gold shadow-neon-gold rounded-full" animate={{ width: `${liveEnergy * 100}%` }} />
             </div>
-          </div>
-        )}
-
-        {uploadStep === 'category' && (
-          <div className="w-full flex flex-col items-center gap-4 bg-peaky-charcoal/80 p-6 rounded-2xl border border-peaky-steel backdrop-blur-md">
-            <span className="text-white text-sm font-bold tracking-widest uppercase">Zgjidh Kategorinë:</span>
-            <div className="flex gap-6">
-              <button onClick={() => handleUploadWithCategory('💬')} className="flex flex-col items-center gap-1 hover:scale-110 transition-transform">
-                <span className="text-4xl">💬</span>
-                <span className="text-[10px] text-gray-300 uppercase">Muhabet</span>
-              </button>
-              <button onClick={() => handleUploadWithCategory('🎸')} className="flex flex-col items-center gap-1 hover:scale-110 transition-transform">
-                <span className="text-4xl">🎸</span>
-                <span className="text-[10px] text-gray-300 uppercase">Muzikë</span>
-              </button>
-              <button onClick={() => handleUploadWithCategory('🚨')} className="flex flex-col items-center gap-1 hover:scale-110 transition-transform">
-                <span className="text-4xl">🚨</span>
-                <span className="text-[10px] text-gray-300 uppercase">Lajm</span>
-              </button>
-            </div>
-            <button onClick={() => setUploadStep('idle')} className="text-gray-400 text-xs uppercase underline mt-2">
-              Anulo (Fshi Zërin)
+          )}
+          
+          {uploadStep === 'category' ? (
+             <div className="flex justify-around bg-peaky-charcoal/90 p-2 rounded-full border border-peaky-steel shadow-2xl">
+                {['💬', '🎸', '🚨'].map(c => <button key={c} onClick={() => handleUploadWithCategory(c)} className="text-2xl hover:scale-110 p-2">{c}</button>)}
+             </div>
+          ) : (
+            <button onClick={isRecording ? stopRecording : startRecording} 
+              className={`w-full py-4 rounded-full font-bold uppercase tracking-widest text-sm flex items-center justify-center gap-2 transition-all ${isRecording ? 'bg-white text-black animate-pulse' : 'bg-peaky-blood text-white shadow-[0_0_20px_rgba(220,38,38,0.5)] hover:bg-red-700 hover:scale-[1.02]'}`}>
+              {isRecording ? <Square size={16} fill="black"/> : <Radio size={18} />}
+              {isRecording ? 'Stop & Zgjidh' : 'Lësho Zërin Këtu'}
             </button>
-          </div>
-        )}
-
-        {uploadStep === 'uploading' && (
-          <button disabled className="px-8 py-4 rounded-full font-bold uppercase tracking-widest text-sm bg-peaky-steel text-gray-400 shadow-neon-gold animate-pulse flex items-center gap-2">
-            Duke u ngarkuar...
-          </button>
-        )}
-        
-        {uploadStep === 'recording' && (
-          <button onClick={stopRecording} className="px-8 py-4 rounded-full font-bold uppercase tracking-widest text-sm transition-all bg-white text-peaky-black hover:bg-gray-300 flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(255,255,255,0.5)]">
-            <Square size={16} fill="currentColor" /> Stop & Zgjidh
-          </button>
-        )}
-        
-        {uploadStep === 'idle' && (
-          <button onClick={startRecording} className="px-8 py-4 rounded-full font-bold uppercase tracking-widest text-sm transition-all bg-peaky-blood text-white shadow-neon-blood hover:bg-red-700 hover:scale-105 active:scale-95 flex items-center justify-center gap-2">
-            <Play size={16} fill="currentColor" /> Drop a Pulse
-          </button>
-        )}
+          )}
+        </div>
       </div>
     </main>
   );
 }
 
 export default function App() {
-  return (
-    <Suspense fallback={<div className="w-full h-screen bg-peaky-black flex justify-center items-center text-peaky-blood">Loading Map...</div>}>
-      <MapEngine />
-    </Suspense>
-  );
+  return <Suspense fallback={<div className="w-full h-screen bg-peaky-black"></div>}><MapEngine /></Suspense>;
 }
