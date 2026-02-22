@@ -217,7 +217,7 @@ function MapEngine() {
         )}
       </AnimatePresence>
 
-      <Map ref={mapRef} initialViewState={{ longitude: 20.1683, latitude: 41.1533, zoom: 7 }} maxBounds={ALBANIA_BOUNDS} mapStyle={MAP_STYLE} attributionControl={false}>
+      <Map ref={mapRef} initialViewState={{ longitude: 20.1683, latitude: 41.1533, zoom: 7, pitch: 45 }} maxBounds={ALBANIA_BOUNDS} mapStyle={MAP_STYLE} attributionControl={false}>
         {pulses.map((pulse) => {
           const age = Date.now() - new Date(pulse.created_at).getTime();
           const life = Math.max(0, 1 - (age / MAX_AGE_MS));
