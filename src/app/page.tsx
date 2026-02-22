@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Map, { Marker, MapRef } from 'react-map-gl/maplibre';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Share2, Play, Square, Volume2, Flame } from 'lucide-react';
+import { Share2, Play, Square, X, Flame } from 'lucide-react'; 
 import { useAudioPulse } from '@/app/hooks/useAudioPulse';
 import { supabase } from '@/utils/supabase'; 
 import 'maplibre-gl/dist/maplibre-gl.css';
@@ -31,7 +31,6 @@ function MapEngine() {
   const pannerRef = useRef<StereoPannerNode | null>(null);
   const currentAudioElement = useRef<HTMLAudioElement | null>(null);
 
-  
   useEffect(() => {
     const fetchPulses = async () => {
       const yesterday = new Date(Date.now() - MAX_AGE_MS).toISOString();
@@ -48,7 +47,6 @@ function MapEngine() {
     return () => clearInterval(interval);
   }, []);
 
-  
   useEffect(() => {
     const sharedId = searchParams.get('pulse');
     if (sharedId && pulses.length > 0) {
@@ -59,7 +57,6 @@ function MapEngine() {
     }
   }, [searchParams, pulses]);
 
-  
   useEffect(() => {
     if (isRecording) {
       setUploadStep('recording');
@@ -68,13 +65,11 @@ function MapEngine() {
     }
   }, [isRecording, audioBlob, uploadStep]);
 
-  
   const handleUploadWithCategory = async (selectedCategory: string) => {
     if (!audioBlob || peakEnergy === 0) return;
     setUploadStep('uploading');
     
     try {
-      
       const position = await new Promise<GeolocationPosition>((resolve, reject) => {
         navigator.geolocation.getCurrentPosition(resolve, reject, {
           enableHighAccuracy: true, timeout: 15000, maximumAge: 0
@@ -82,7 +77,6 @@ function MapEngine() {
       });
 
       const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.webm`;
-      
       
       const { error: uploadError } = await supabase.storage
         .from('audio_pulses')
@@ -115,7 +109,6 @@ function MapEngine() {
     }
   };
 
-  
   const handleGiveRespect = async (id: string) => {
     const { error } = await supabase.rpc('increment_respect', { row_id: id });
     
@@ -130,11 +123,9 @@ function MapEngine() {
     }
   };
 
-  
   const handlePlayPulse = async (pulse: Pulse) => {
     setActivePulse(pulse);
     try {
-      
       if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
       if (audioCtxRef.current.state === 'suspended') await audioCtxRef.current.resume();
 
@@ -143,7 +134,6 @@ function MapEngine() {
         currentAudioElement.current.src = ""; 
       }
 
-      
       const audio = new Audio();
       audio.crossOrigin = "anonymous"; 
       audio.src = pulse.audio_url;
@@ -167,6 +157,8 @@ function MapEngine() {
       if (playPromise !== undefined) {
         playPromise.catch(() => audio.play().catch(() => {}));
       }
+      
+      
       audio.onended = () => setActivePulse(null);
     } catch (err) { console.error("Playback Error:", err); }
   };
@@ -192,9 +184,8 @@ function MapEngine() {
           const lifeRemaining = Math.max(0, 1 - (age / MAX_AGE_MS));
           if (lifeRemaining === 0) return null; 
 
-          
           const respectLevel = pulse.respect_count || 0;
-          const dynamicSize = `${16 + respectLevel * 2}px`; 
+          const dynamicSize = `${16 + respectLevel * 2}px`;
 
           return (
             <Marker key={pulse.id} longitude={pulse.lng} latitude={pulse.lat} anchor="bottom">
@@ -207,7 +198,6 @@ function MapEngine() {
                 </span>
                 
                 <motion.div
-                  
                   onPointerDown={(e) => { e.stopPropagation(); handlePlayPulse(pulse); }}
                   className="rounded-full bg-peaky-blood cursor-pointer border-2 border-white -mt-2"
                   style={{ 
@@ -225,31 +215,58 @@ function MapEngine() {
         })}
       </Map>
 
+      {/**/}
       <AnimatePresence>
         {activePulse && (
           <motion.div 
-            initial={{ y: 100, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 100, opacity: 0 }}
-            className="absolute top-safe right-4 md:top-10 md:right-10 z-20 bg-peaky-charcoal border border-peaky-steel p-4 rounded-xl shadow-2xl flex items-center gap-4 text-white mt-4"
+            initial={{ y: -50, opacity: 0 }} 
+            animate={{ y: 0, opacity: 1 }} 
+            exit={{ y: -50, opacity: 0 }}
+            
+            className="absolute top-12 left-4 right-4 md:top-10 md:left-auto md:right-10 md:w-auto z-50 bg-peaky-charcoal/95 backdrop-blur-md border border-peaky-steel p-4 rounded-xl shadow-2xl flex items-center justify-between gap-4 text-white"
           >
-            <span className="text-2xl">{activePulse.category || '💬'}</span>
-            <div className="flex flex-col flex-1 min-w-[120px]">
-              <span className="text-xs text-gray-400 font-mono tracking-widest uppercase">Duke luajtur</span>
-              <span className="text-sm font-bold flex items-center gap-1">
-                {activePulse.respect_count || 0} <Flame size={14} className="text-orange-500" /> Respect
-              </span>
+            {/**/}
+            <div className="flex items-center gap-3">
+              <span className="text-3xl drop-shadow-md">{activePulse.category || '💬'}</span>
+              <div className="flex flex-col">
+                <span className="text-[10px] text-gray-400 font-mono tracking-widest uppercase">Duke luajtur</span>
+                <span className="text-sm font-bold flex items-center gap-1">
+                  {activePulse.respect_count || 0} <Flame size={14} className="text-orange-500" /> Respect
+                </span>
+              </div>
             </div>
             
-            <button 
-              onClick={() => handleGiveRespect(activePulse.id)}
-              className="p-3 bg-peaky-blood hover:bg-red-600 rounded-full transition-all hover:scale-110 shadow-[0_0_15px_rgba(220,38,38,0.5)]"
-              title="Jepi Zjarr!"
-            >
-              🔥
-            </button>
+            {/**/}
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={() => handleGiveRespect(activePulse.id)}
+                className="p-3 bg-peaky-blood hover:bg-red-600 rounded-full transition-all hover:scale-110 shadow-[0_0_15px_rgba(220,38,38,0.5)]"
+                title="Jepi Zjarr!"
+              >
+                🔥
+              </button>
 
-            <button onClick={() => handleShare(activePulse.id)} className="p-3 bg-peaky-steel hover:bg-peaky-gold hover:text-black rounded-full transition-colors">
-              <Share2 size={16} />
-            </button>
+              <button 
+                onClick={() => handleShare(activePulse.id)} 
+                className="p-3 bg-peaky-steel hover:bg-peaky-gold hover:text-black rounded-full transition-colors"
+                title="Shpërndaj"
+              >
+                <Share2 size={16} />
+              </button>
+
+              {/**/}
+              <button 
+                onClick={() => {
+                  if (currentAudioElement.current) {
+                    currentAudioElement.current.pause();
+                  }
+                  setActivePulse(null);
+                }} 
+                className="p-2 ml-1 text-gray-400 hover:text-white transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -266,7 +283,7 @@ function MapEngine() {
         )}
 
         {uploadStep === 'category' && (
-          <div className="w-full flex flex-col items-center gap-4 bg-peaky-charcoal/80 p-6 rounded-2xl border border-peaky-steel backdrop-blur-md">
+          <div className="w-full flex flex-col items-center gap-4 bg-peaky-charcoal/90 p-6 rounded-2xl border border-peaky-steel backdrop-blur-md shadow-2xl">
             <span className="text-white text-sm font-bold tracking-widest uppercase">Zgjidh Kategorinë:</span>
             <div className="flex gap-6">
               <button onClick={() => handleUploadWithCategory('💬')} className="flex flex-col items-center gap-1 hover:scale-110 transition-transform">
@@ -282,7 +299,7 @@ function MapEngine() {
                 <span className="text-[10px] text-gray-300 uppercase">Lajm</span>
               </button>
             </div>
-            <button onClick={() => setUploadStep('idle')} className="text-gray-400 text-xs uppercase underline mt-2">
+            <button onClick={() => setUploadStep('idle')} className="text-gray-400 text-xs uppercase underline mt-4">
               Anulo (Fshi Zërin)
             </button>
           </div>
@@ -312,7 +329,7 @@ function MapEngine() {
 
 export default function App() {
   return (
-    <Suspense fallback={<div className="w-full h-screen bg-peaky-black flex justify-center items-center text-peaky-blood">Loading Map...</div>}>
+    <Suspense fallback={<div className="w-full h-screen bg-peaky-black flex justify-center items-center text-peaky-blood tracking-widest font-mono text-sm uppercase">Loading Map...</div>}>
       <MapEngine />
     </Suspense>
   );
