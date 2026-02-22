@@ -4,7 +4,7 @@ import { useState, useEffect, useRef, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Map, { Marker, MapRef } from 'react-map-gl/maplibre';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Share2, Play, Square, X, Flame } from 'lucide-react'; 
+import { Share2, Play, Square, X, Flame, Radio } from 'lucide-react'; 
 import { useAudioPulse } from '@/app/hooks/useAudioPulse';
 import { supabase } from '@/utils/supabase'; 
 import 'maplibre-gl/dist/maplibre-gl.css';
@@ -12,6 +12,35 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 const MAP_STYLE = 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json';
 const ALBANIA_BOUNDS: [number, number, number, number] = [18.5, 39.5, 21.5, 43.0];
 const MAX_AGE_MS = 24 * 60 * 60 * 1000; 
+
+
+const CITIES = [
+  { name: 'Tirana', lat: 41.3275, lng: 19.8187 },
+  { name: 'Durrësi', lat: 41.3246, lng: 19.4565 },
+  { name: 'Shkodra', lat: 42.0693, lng: 19.5033 },
+  { name: 'Vlora', lat: 40.4650, lng: 19.4850 },
+  { name: 'Korça', lat: 40.6143, lng: 20.7778 },
+  { name: 'Elbasani', lat: 41.1102, lng: 20.0867 },
+  { name: 'Fieri', lat: 40.7239, lng: 19.5561 },
+  { name: 'Berati', lat: 40.7086, lng: 19.9436 },
+  { name: 'Gjirokastra', lat: 40.0673, lng: 20.1045 },
+  { name: 'Saranda', lat: 39.8730, lng: 20.0059 },
+  { name: 'Kukësi', lat: 42.0767, lng: 20.4219 },
+  { name: 'Lezha', lat: 41.7836, lng: 19.6436 }
+];
+
+
+const PHRASES = [
+  "{city} po zien nga thashethemet... vëri veshin!",
+  "Dikush në {city} sapo lëshoi një perlë të vërtetë.",
+  "Zhurmë e madhe po vjen nga {city} tani.",
+  "E dëgjuat çfarë u tha në {city}?",
+  "{city} ka diçka shumë interesante për të thënë.",
+  "Një sekret sapo u zbulua në rrugët e {city}t.",
+  "Valë e re energjie u kap në {city}!",
+  "{city} nuk zhgënjen kurrë. Shko dëgjoje!",
+  "Mos i trego njeriu, por {city} po flet..."
+];
 
 type Pulse = { 
   id: string; lat: number; lng: number; energy_value: number; 
@@ -22,9 +51,10 @@ function MapEngine() {
   const [pulses, setPulses] = useState<Pulse[]>([]);
   const [activePulse, setActivePulse] = useState<Pulse | null>(null);
   const [uploadStep, setUploadStep] = useState<'idle' | 'recording' | 'category' | 'uploading'>('idle');
-  
-  
   const [respectedPulses, setRespectedPulses] = useState<string[]>([]);
+  
+  
+  const [streetNews, setStreetNews] = useState<string | null>(null);
   
   const mapRef = useRef<MapRef>(null);
   const searchParams = useSearchParams();
@@ -34,7 +64,6 @@ function MapEngine() {
   const pannerRef = useRef<StereoPannerNode | null>(null);
   const currentAudioElement = useRef<HTMLAudioElement | null>(null);
 
-  
   useEffect(() => {
     const savedRespects = JSON.parse(localStorage.getItem('respectedPulses') || '[]');
     setRespectedPulses(savedRespects);
@@ -55,6 +84,37 @@ function MapEngine() {
     const interval = setInterval(fetchPulses, 60000); 
     return () => clearInterval(interval);
   }, []);
+
+  
+  useEffect(() => {
+    if (pulses.length === 0) return;
+
+    const generateNews = () => {
+      
+      const randomPulse = pulses[Math.floor(Math.random() * pulses.length)];
+      
+      let nearestCity = "Diku në Shqipëri";
+      let minDistance = 0.2; 
+
+      
+      CITIES.forEach(city => {
+        const dist = Math.sqrt(Math.pow(city.lat - randomPulse.lat, 2) + Math.pow(city.lng - randomPulse.lng, 2));
+        if (dist < minDistance) {
+          minDistance = dist;
+          nearestCity = city.name;
+        }
+      });
+
+      
+      const randomPhrase = PHRASES[Math.floor(Math.random() * PHRASES.length)];
+      setStreetNews(randomPhrase.replace("{city}", nearestCity));
+    };
+
+    generateNews();
+    const newsInterval = setInterval(generateNews, 8000); 
+
+    return () => clearInterval(newsInterval);
+  }, [pulses]);
 
   useEffect(() => {
     const sharedId = searchParams.get('pulse');
@@ -119,17 +179,12 @@ function MapEngine() {
   };
 
   const handleGiveRespect = async (id: string) => {
-    
-    if (respectedPulses.includes(id)) {
-      return; 
-    }
+    if (respectedPulses.includes(id)) return;
 
-    
     const newRespectedList = [...respectedPulses, id];
     setRespectedPulses(newRespectedList);
     localStorage.setItem('respectedPulses', JSON.stringify(newRespectedList));
 
-    
     const { error } = await supabase.rpc('increment_respect', { row_id: id });
     
     if (!error) {
@@ -171,7 +226,7 @@ function MapEngine() {
           const mapCenterLng = mapRef.current.getCenter().lng;
           panner.pan.value = Math.max(-1, Math.min(1, (pulse.lng - mapCenterLng) * 2)); 
         }
-      } catch (e) { console.warn("Efekti 3D dështoi, po luajmë zërin normalisht.", e); }
+      } catch (e) { console.warn("Panner fallback", e); }
 
       const playPromise = audio.play();
       if (playPromise !== undefined) {
@@ -190,6 +245,26 @@ function MapEngine() {
 
   return (
     <main className="relative w-full h-[100dvh] bg-peaky-black overflow-hidden font-sans">
+      
+      {/* */}
+      <AnimatePresence mode="wait">
+        {streetNews && (
+          <motion.div
+            key={streetNews} 
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            transition={{ duration: 0.8 }}
+            className="absolute top-4 left-1/2 -translate-x-1/2 z-40 bg-peaky-charcoal/80 backdrop-blur-md border border-peaky-steel px-6 py-2 rounded-full shadow-[0_0_15px_rgba(255,215,0,0.1)] flex items-center gap-3 w-max max-w-[90vw]"
+          >
+            <Radio size={16} className="text-peaky-gold animate-pulse" />
+            <span className="text-white text-xs sm:text-sm font-mono tracking-wide">
+              {streetNews}
+            </span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <Map
         ref={mapRef}
         initialViewState={{ longitude: 20.1683, latitude: 41.1533, zoom: 7, pitch: 45 }}
@@ -204,12 +279,9 @@ function MapEngine() {
           if (lifeRemaining === 0) return null; 
 
           const respectLevel = pulse.respect_count || 0;
-          
-          
           const sizeIncrease = Math.min(respectLevel * 0.3, 8); 
           const dynamicSize = `${16 + sizeIncrease}px`; 
 
-          
           const glowIncrease = Math.min(respectLevel * 1.5, 20); 
           const glowOpacity = 0.5 + Math.min(respectLevel * 0.02, 0.4); 
           const dynamicGlow = `0 0 ${10 + glowIncrease}px rgba(220, 38, 38, ${glowOpacity})`;
@@ -248,7 +320,7 @@ function MapEngine() {
             initial={{ y: -50, opacity: 0 }} 
             animate={{ y: 0, opacity: 1 }} 
             exit={{ y: -50, opacity: 0 }}
-            className="absolute top-12 left-4 right-4 md:top-10 md:left-auto md:right-10 md:w-auto z-50 bg-peaky-charcoal/95 backdrop-blur-md border border-peaky-steel p-4 rounded-xl shadow-2xl flex items-center justify-between gap-4 text-white"
+            className="absolute top-20 left-4 right-4 md:top-20 md:left-auto md:right-10 md:w-auto z-50 bg-peaky-charcoal/95 backdrop-blur-md border border-peaky-steel p-4 rounded-xl shadow-2xl flex items-center justify-between gap-4 text-white"
           >
             <div className="flex items-center gap-3">
               <span className="text-3xl drop-shadow-md">{activePulse.category || '💬'}</span>
@@ -269,24 +341,17 @@ function MapEngine() {
                     ? 'bg-gray-600 cursor-not-allowed opacity-50' 
                     : 'bg-peaky-blood hover:bg-red-600 hover:scale-110' 
                 }`}
-                title={respectedPulses.includes(activePulse.id) ? "Ke dhënë zjarr!" : "Jepi Zjarr!"}
               >
                 🔥
               </button>
 
-              <button 
-                onClick={() => handleShare(activePulse.id)} 
-                className="p-3 bg-peaky-steel hover:bg-peaky-gold hover:text-black rounded-full transition-colors"
-                title="Shpërndaj"
-              >
+              <button onClick={() => handleShare(activePulse.id)} className="p-3 bg-peaky-steel hover:bg-peaky-gold hover:text-black rounded-full transition-colors">
                 <Share2 size={16} />
               </button>
 
               <button 
                 onClick={() => {
-                  if (currentAudioElement.current) {
-                    currentAudioElement.current.pause();
-                  }
+                  if (currentAudioElement.current) currentAudioElement.current.pause();
                   setActivePulse(null);
                 }} 
                 className="p-2 ml-1 text-gray-400 hover:text-white transition-colors"
