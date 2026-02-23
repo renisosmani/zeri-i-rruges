@@ -117,13 +117,26 @@ function MapEngine() {
     if (!audioBlob || peakEnergy === 0) return;
     setUploadStep('uploading');
     
-    try {
-      // Timeout pas 10 sekondash nëse GPS është bllokuar
-      const pos = await new Promise<GeolocationPosition>((res, rej) => {
-        navigator.geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: true, timeout: 10000 });
-      });
+    let lat = 41.3275; 
+    let lng = 19.8187;
+    let isGhost = false;
 
-      // Përshtatja e formatit për iPhone vs Android
+    try {
+      
+      const pos = await new Promise<GeolocationPosition>((res, rej) => {
+        navigator.geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: true, timeout: 5000 });
+      });
+      lat = pos.coords.latitude;
+      lng = pos.coords.longitude;
+    } catch (error) {
+      
+      isGhost = true;
+      
+      lat = 41.3275 + (Math.random() - 0.5) * 0.1; 
+      lng = 19.8187 + (Math.random() - 0.5) * 0.1;
+    }
+    
+    try {
       const ext = audioBlob.type.includes('mp4') ? 'mp4' : 'webm';
       const fileName = `${Date.now()}.${ext}`;
 
@@ -131,7 +144,7 @@ function MapEngine() {
       const { data: url } = supabase.storage.from('audio_pulses').getPublicUrl(fileName);
       
       const { data } = await supabase.from('pulses').insert([{ 
-        lat: pos.coords.latitude, lng: pos.coords.longitude, energy_value: peakEnergy, 
+        lat: lat, lng: lng, energy_value: peakEnergy, 
         audio_url: url.publicUrl, category: cat, respect_count: 0 
       }]).select();
       
@@ -139,10 +152,14 @@ function MapEngine() {
         setPulses(prev => [data[0], ...prev]);
         const newMyPulses = [...myPulses, data[0].id];
         setMyPulses(newMyPulses); localStorage.setItem('myPulses', JSON.stringify(newMyPulses));
+        
+        
+        if (isGhost) {
+          alert("👻 GPS ishte i fikur! Zëri yt u lëshua si 'Fantazmë' në një lokacion të rastësishëm.");
+        }
       }
-    } catch (error: any) {
-      if (error.code === 1) alert("⚠️ Zëri nuk u hodh: Duhet të lejosh lokacionin (GPS) nga browseri!");
-      else alert("⚠️ Ndodhi një problem. Provo sërish.");
+    } catch (error) {
+      alert("⚠️ Ndodhi një problem me serverin. Provo sërish.");
     }
     
     setUploadStep('idle');
