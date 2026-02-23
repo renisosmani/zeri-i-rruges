@@ -21,7 +21,7 @@ export const useAudioPulse = () => {
 
   const startRecording = useCallback(async () => {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      alert("Browser blocking microphone access. Use http://localhost:3000.");
+      alert("⚠️ Browseri po bllokon mikrofonin. Sigurohu që po përdor HTTPS.");
       return;
     }
 
@@ -37,13 +37,24 @@ export const useAudioPulse = () => {
       const bufferLength = analyser.frequencyBinCount;
       const dataArray = new Uint8Array(bufferLength);
 
-      mediaRecorderRef.current = new MediaRecorder(stream);
+      
+      const mimeType = MediaRecorder.isTypeSupported('audio/webm') 
+        ? 'audio/webm' 
+        : 'audio/mp4'; 
+
+      mediaRecorderRef.current = new MediaRecorder(stream, { mimeType });
       const audioChunks: BlobPart[] = [];
 
-      mediaRecorderRef.current.ondataavailable = (e) => audioChunks.push(e.data);
+      mediaRecorderRef.current.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunks.push(e.data);
+      };
+
       mediaRecorderRef.current.onstop = () => {
-        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+        
+        const audioBlob = new Blob(audioChunks, { type: mimeType });
         setState(prev => ({ ...prev, isRecording: false, audioBlob }));
+        
+        
         stream.getTracks().forEach(track => track.stop());
         cancelAnimationFrame(animationFrameRef.current);
       };
@@ -54,7 +65,7 @@ export const useAudioPulse = () => {
         analyser.getByteFrequencyData(dataArray);
         const sum = dataArray.reduce((a, b) => a + b, 0);
         const average = sum / bufferLength;
-        const normalizedEnergy = average / 255; 
+        const normalizedEnergy = average / 128; 
 
         if (normalizedEnergy > currentPeak) currentPeak = normalizedEnergy;
 
@@ -73,10 +84,10 @@ export const useAudioPulse = () => {
 
     } catch (error) {
       console.error('Microphone access denied.', error);
+      alert("⚠️ Duhet të pranosh aksesin te mikrofoni që të regjistrosh!");
     }
   }, []);
 
-  // NEW: Manual stop function
   const stopRecording = useCallback(() => {
     if (mediaRecorderRef.current?.state === 'recording') {
       mediaRecorderRef.current.stop();
