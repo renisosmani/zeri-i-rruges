@@ -59,6 +59,13 @@ function MapEngine() {
   
   const mapRef = useRef<MapRef>(null);
   const { isRecording, liveEnergy, peakEnergy, audioBlob, startRecording, stopRecording } = useAudioPulse();
+  
+  useEffect(() => {
+    if (audioBlob) {
+      setUploadStep('category');
+    }
+  }, [audioBlob]);
+
   const audioCtxRef = useRef<AudioContext | null>(null);
   const currentAudioElement = useRef<HTMLAudioElement | null>(null);
 
