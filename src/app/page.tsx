@@ -20,6 +20,16 @@ const CITIES = [
   { name: 'Korçë', lat: 40.6143, lng: 20.7778 }, { name: 'Elbasan', lat: 41.1102, lng: 20.0867 }
 ];
 
+
+const CITY_PHRASES: Record<string, string> = {
+  'Tiranë': 'Po bëhet nami në Tiranë 🔥',
+  'Durrës': 'Durrësi po flet 🌊',
+  'Shkodër': 'Shkodra ka diçka për të thënë 🚲',
+  'Vlorë': 'Vlora po nxeh situatën 🌴',
+  'Korçë': 'Korça po zjen 🍎',
+  'Elbasan': 'Elbasani u ndez 🏭'
+};
+
 const NEON_COLORS = ['#f43f5e', '#a855f7', '#3b82f6', '#10b981', '#f59e0b', '#06b6d4', '#ec4899', '#8b5cf6'];
 const getColorFromId = (id: string) => {
   let hash = 0;
@@ -56,6 +66,10 @@ function MapEngine() {
   const [activePulse, setActivePulse] = useState<Pulse | null>(null);
   const [activeCluster, setActiveCluster] = useState<Pulse[] | null>(null);
   const [replyTo, setReplyTo] = useState<Pulse | null>(null);
+  
+  
+  const [trendingMsg, setTrendingMsg] = useState<string | null>(null);
+  const lastTrendingState = useRef<string>('');
   
   const [bounds, setBounds] = useState<[number, number, number, number] | undefined>(undefined);
   const [zoom, setZoom] = useState(7);
@@ -102,6 +116,36 @@ function MapEngine() {
     const interval = setInterval(fetchPulses, 15000); 
     return () => clearInterval(interval);
   }, []);
+
+  
+  useEffect(() => {
+    if (pulses.length === 0) return;
+    const counts: Record<string, number> = {};
+    pulses.forEach(p => {
+      const city = getNearestCity(p.lat, p.lng);
+      if (city !== 'Diku') counts[city] = (counts[city] || 0) + 1;
+    });
+    const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+
+    if (sorted.length > 0 && sorted[0][1] >= 2) {
+      const topCity = sorted[0][0];
+      const pulseCount = sorted[0][1];
+      const currentState = `${topCity}-${pulseCount}`;
+
+      
+      if (lastTrendingState.current !== currentState) {
+        lastTrendingState.current = currentState;
+        setTrendingMsg(CITY_PHRASES[topCity] || `Po bëhet nami në ${topCity} 🔥`);
+
+        
+        const timer = setTimeout(() => {
+          setTrendingMsg(null);
+        }, 6000);
+
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [pulses]);
 
   const points = pulses.map(pulse => ({
     type: 'Feature' as const,
@@ -256,34 +300,17 @@ function MapEngine() {
     }
   };
 
-  // LOGJIKA PËR QYTETIN "ON FIRE"
-  const getTrendingCity = () => {
-    if (pulses.length === 0) return null;
-    const counts: Record<string, number> = {};
-    pulses.forEach(p => {
-      const city = getNearestCity(p.lat, p.lng);
-      if (city !== 'Diku') counts[city] = (counts[city] || 0) + 1;
-    });
-    const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
-    // Nëse qyteti i parë ka të paktën 2 zëra aktivë, shfaqe si "Nami"
-    if (sorted.length > 0 && sorted[0][1] >= 2) {
-      return { name: sorted[0][0], count: sorted[0][1] };
-    }
-    return null;
-  };
-  const trendingCity = getTrendingCity();
-
   return (
     <main className="relative w-full h-[100dvh] bg-peaky-black overflow-hidden font-sans select-none">
       
-      {/* NJOFTIMI EPIDEMIK LART (ZONA E ZJARRIT) */}
+      {/**/}
       <AnimatePresence>
-        {trendingCity && (
+        {trendingMsg && (
           <motion.div initial={{ y: -50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -50, opacity: 0 }}
             className="absolute top-6 left-1/2 -translate-x-1/2 z-40 pointer-events-none">
             <div className="bg-peaky-blood/90 backdrop-blur-md border border-red-500 text-white text-xs sm:text-sm px-5 py-2.5 rounded-full flex items-center gap-2 shadow-[0_0_20px_rgba(220,38,38,0.6)] font-bold tracking-widest uppercase">
-              <Flame size={16} className="text-peaky-gold animate-pulse"/>
-              Po bëhet nami në {trendingCity.name}
+              <Radio size={16} className="text-peaky-gold animate-pulse"/>
+              {trendingMsg}
             </div>
           </motion.div>
         )}
