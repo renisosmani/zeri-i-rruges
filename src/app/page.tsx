@@ -49,7 +49,6 @@ function MapEngine() {
   const [activePulse, setActivePulse] = useState<Pulse | null>(null);
   const [activeCluster, setActiveCluster] = useState<Pulse[] | null>(null);
   
-  
   const [bounds, setBounds] = useState<[number, number, number, number] | undefined>(undefined);
   const [zoom, setZoom] = useState(7);
   
@@ -77,7 +76,6 @@ function MapEngine() {
     return () => clearInterval(interval);
   }, []);
 
-  
   const points = pulses.map(pulse => ({
     type: 'Feature' as const,
     properties: { cluster: false, ...pulse },
@@ -118,20 +116,53 @@ function MapEngine() {
   const handleUploadWithCategory = async (cat: string) => {
     if (!audioBlob || peakEnergy === 0) return;
     setUploadStep('uploading');
+    
     try {
-      const pos = await new Promise<GeolocationPosition>((res, rej) => navigator.geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: true }));
-      const fileName = `${Date.now()}.webm`;
-      await supabase.storage.from('audio_pulses').upload(fileName, audioBlob, { contentType: 'audio/webm' });
+      // Timeout pas 10 sekondash nëse GPS është bllokuar
+      const pos = await new Promise<GeolocationPosition>((res, rej) => {
+        navigator.geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: true, timeout: 10000 });
+      });
+
+      // Përshtatja e formatit për iPhone vs Android
+      const ext = audioBlob.type.includes('mp4') ? 'mp4' : 'webm';
+      const fileName = `${Date.now()}.${ext}`;
+
+      await supabase.storage.from('audio_pulses').upload(fileName, audioBlob, { contentType: audioBlob.type });
       const { data: url } = supabase.storage.from('audio_pulses').getPublicUrl(fileName);
-      const { data } = await supabase.from('pulses').insert([{ lat: pos.coords.latitude, lng: pos.coords.longitude, energy_value: peakEnergy, audio_url: url.publicUrl, category: cat, respect_count: 0 }]).select();
+      
+      const { data } = await supabase.from('pulses').insert([{ 
+        lat: pos.coords.latitude, lng: pos.coords.longitude, energy_value: peakEnergy, 
+        audio_url: url.publicUrl, category: cat, respect_count: 0 
+      }]).select();
       
       if (data) {
         setPulses(prev => [data[0], ...prev]);
         const newMyPulses = [...myPulses, data[0].id];
         setMyPulses(newMyPulses); localStorage.setItem('myPulses', JSON.stringify(newMyPulses));
       }
-    } catch (e) { alert("Gabim në ngarkim!"); }
+    } catch (error: any) {
+      if (error.code === 1) alert("⚠️ Zëri nuk u hodh: Duhet të lejosh lokacionin (GPS) nga browseri!");
+      else alert("⚠️ Ndodhi një problem. Provo sërish.");
+    }
+    
     setUploadStep('idle');
+  };
+
+  const handleDeleteMyPulse = async (pulseId: string, audioUrl: string) => {
+    if (!confirm("Je i sigurt që do ta fshish këtë zë përgjithmonë?")) return;
+    if (currentAudioElement.current) currentAudioElement.current.pause();
+    setActivePulse(null);
+
+    await supabase.from('pulses').delete().eq('id', pulseId);
+    
+    const fileName = audioUrl.split('/').pop();
+    if (fileName) await supabase.storage.from('audio_pulses').remove([fileName]);
+
+    setPulses(prev => prev.filter(p => p.id !== pulseId));
+    
+    const updatedMyPulses = myPulses.filter(id => id !== pulseId);
+    setMyPulses(updatedMyPulses);
+    localStorage.setItem('myPulses', JSON.stringify(updatedMyPulses));
   };
 
   const handleGiveRespect = async (id: string) => {
@@ -162,7 +193,6 @@ function MapEngine() {
               <Marker key={`cluster-${cluster.id}`} longitude={longitude} latitude={latitude}>
                 <motion.div 
                   onClick={() => {
-                    
                     const leaves = supercluster?.getLeaves(cluster.id as number, Infinity) || [];
                     setActiveCluster(leaves.map(l => l.properties as Pulse).sort((a,b) => b.respect_count - a.respect_count));
                   }}
@@ -184,7 +214,6 @@ function MapEngine() {
           const mood = getMoodStyle(pulse.energy_value);
           const size = `${16 + Math.min(pulse.respect_count * 0.3, 8)}px`;
 
-          
           return (
             <Marker key={pulse.id} longitude={longitude} latitude={latitude} anchor="bottom">
               <div className="flex flex-col items-center relative cursor-pointer" onClick={() => handlePlayPulse(pulse)}>
@@ -212,7 +241,6 @@ function MapEngine() {
             <div className="p-5 border-b border-peaky-steel/50 flex justify-between items-center bg-black/20">
               <div className="flex flex-col">
                 <span className="flex items-center gap-2 text-peaky-gold text-xs font-mono uppercase tracking-widest"><Radio size={12} className="animate-pulse"/> Lagjja Live</span>
-                {/* */}
                 <h2 className="text-white text-xl font-bold flex items-center gap-2 mt-1">
                   <MapPin size={18} className="text-peaky-blood"/> {activeCluster[0] ? getNearestCity(activeCluster[0].lat, activeCluster[0].lng) : 'Diku'}
                 </h2>
