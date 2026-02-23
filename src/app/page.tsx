@@ -20,6 +20,13 @@ const CITIES = [
   { name: 'Korçë', lat: 40.6143, lng: 20.7778 }, { name: 'Elbasan', lat: 41.1102, lng: 20.0867 }
 ];
 
+const NEON_COLORS = ['#f43f5e', '#a855f7', '#3b82f6', '#10b981', '#f59e0b', '#06b6d4', '#ec4899', '#8b5cf6'];
+const getColorFromId = (id: string) => {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = id.charCodeAt(i) + ((hash << 5) - hash);
+  return NEON_COLORS[Math.abs(hash) % NEON_COLORS.length];
+};
+
 const getMoodStyle = (energy: number) => {
   if (energy >= 0.7) return { color: '#ef4444', shadowRgb: '239, 68, 68' };
   if (energy >= 0.4) return { color: '#a855f7', shadowRgb: '168, 85, 247' };
@@ -42,15 +49,12 @@ const getNearestCity = (lat: number, lng: number) => {
   return nearest;
 };
 
-
 type Pulse = { id: string; lat: number; lng: number; energy_value: number; audio_url: string; created_at: string; category: string; respect_count: number; parent_id?: string | null; };
 
 function MapEngine() {
   const [pulses, setPulses] = useState<Pulse[]>([]);
   const [activePulse, setActivePulse] = useState<Pulse | null>(null);
   const [activeCluster, setActiveCluster] = useState<Pulse[] | null>(null);
-  
- 
   const [replyTo, setReplyTo] = useState<Pulse | null>(null);
   
   const [bounds, setBounds] = useState<[number, number, number, number] | undefined>(undefined);
@@ -83,7 +87,6 @@ function MapEngine() {
       
       if (data) {
         const now = Date.now();
-        
         const validPulses = data.filter(p => {
           const age = now - new Date(p.created_at).getTime();
           if (p.category === '👻') {
@@ -113,7 +116,6 @@ function MapEngine() {
     options: { radius: 60, maxZoom: 15 } 
   });
 
-  
   const lineData = {
     type: 'FeatureCollection' as const,
     features: pulses.filter(p => p.parent_id).map(child => {
@@ -121,6 +123,7 @@ function MapEngine() {
       if (!parent) return null;
       return {
         type: 'Feature' as const,
+        properties: { color: getColorFromId(parent.id) },
         geometry: {
           type: 'LineString' as const,
           coordinates: [[child.lng, child.lat], [parent.lng, parent.lat]]
@@ -194,7 +197,6 @@ function MapEngine() {
       const { data: url } = supabase.storage.from('audio_pulses').getPublicUrl(fileName);
       const finalCategory = isGhost ? '👻' : cat;
 
-      
       const { data, error: dbError } = await supabase.from('pulses').insert([{ 
         lat: lat, lng: lng, energy_value: peakEnergy || 0.5, 
         audio_url: url.publicUrl, category: finalCategory, respect_count: 0,
@@ -222,7 +224,7 @@ function MapEngine() {
     }
     
     setUploadStep('idle');
-    setReplyTo(null); 
+    setReplyTo(null);
   };
 
   const handleDeleteMyPulse = async (pulseId: string, audioUrl: string) => {
@@ -254,22 +256,51 @@ function MapEngine() {
     }
   };
 
+  // LOGJIKA PËR QYTETIN "ON FIRE"
+  const getTrendingCity = () => {
+    if (pulses.length === 0) return null;
+    const counts: Record<string, number> = {};
+    pulses.forEach(p => {
+      const city = getNearestCity(p.lat, p.lng);
+      if (city !== 'Diku') counts[city] = (counts[city] || 0) + 1;
+    });
+    const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+    // Nëse qyteti i parë ka të paktën 2 zëra aktivë, shfaqe si "Nami"
+    if (sorted.length > 0 && sorted[0][1] >= 2) {
+      return { name: sorted[0][0], count: sorted[0][1] };
+    }
+    return null;
+  };
+  const trendingCity = getTrendingCity();
+
   return (
     <main className="relative w-full h-[100dvh] bg-peaky-black overflow-hidden font-sans select-none">
       
+      {/* NJOFTIMI EPIDEMIK LART (ZONA E ZJARRIT) */}
+      <AnimatePresence>
+        {trendingCity && (
+          <motion.div initial={{ y: -50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -50, opacity: 0 }}
+            className="absolute top-6 left-1/2 -translate-x-1/2 z-40 pointer-events-none">
+            <div className="bg-peaky-blood/90 backdrop-blur-md border border-red-500 text-white text-xs sm:text-sm px-5 py-2.5 rounded-full flex items-center gap-2 shadow-[0_0_20px_rgba(220,38,38,0.6)] font-bold tracking-widest uppercase">
+              <Flame size={16} className="text-peaky-gold animate-pulse"/>
+              Po bëhet nami në {trendingCity.name}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <Map ref={mapRef} initialViewState={{ longitude: 20.1683, latitude: 41.1533, zoom: 7, pitch: 45 }} 
            maxBounds={ALBANIA_BOUNDS} mapStyle={MAP_STYLE} attributionControl={false}
            onMove={updateMapBounds} onLoad={updateMapBounds}>
         
-        {/* */}
         <Source id="lasers" type="geojson" data={lineData}>
           <Layer 
             id="laser-lines" 
             type="line" 
             paint={{ 
-              'line-color': '#a855f7', 
-              'line-width': 2, 
-              'line-opacity': 0.6,
+              'line-color': ['get', 'color'], 
+              'line-width': 2.5, 
+              'line-opacity': 0.8,
               'line-dasharray': [2, 2] 
             }} 
           />
@@ -342,7 +373,6 @@ function MapEngine() {
                   <Flame size={12} className={respectedPulses.includes(activePulse.id) ? 'fill-current' : ''}/> {activePulse.respect_count}
                 </button>
 
-                {/* 8. BUTONI I REPLY KËTU */}
                 <button onClick={(e) => { e.stopPropagation(); setReplyTo(activePulse); startRecording(); }} className="p-1 bg-blue-900/30 rounded-md text-blue-400 hover:bg-blue-900/60 hover:text-blue-300">
                   <MessageCircle size={14}/>
                 </button>
@@ -407,7 +437,6 @@ function MapEngine() {
                           <Flame size={12}/> {p.respect_count}
                         </button>
                         
-                        {/* reply ne grup clustering */}
                         <button onClick={(e) => { e.stopPropagation(); setReplyTo(p); startRecording(); setActiveCluster(null); }} className="p-1 text-blue-400 hover:text-blue-300">
                           <MessageCircle size={14}/>
                         </button>
@@ -438,7 +467,6 @@ function MapEngine() {
       <div className="absolute bottom-10 left-1/2 -translate-x-1/2 z-40 flex items-center gap-4 w-11/12 max-w-md">
         <div className="flex-1 relative">
           
-          {/*reply*/}
           <AnimatePresence>
             {replyTo && (
               <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }}
