@@ -114,7 +114,12 @@ function MapEngine() {
   };
 
   const handleUploadWithCategory = async (cat: string) => {
-    if (!audioBlob || peakEnergy === 0) return;
+    
+    if (!audioBlob) {
+      alert("⚠️ Zëri nuk u regjistrua. Provo sërish!");
+      return;
+    }
+    
     setUploadStep('uploading');
     
     let lat = 41.3275; 
@@ -129,9 +134,7 @@ function MapEngine() {
       lat = pos.coords.latitude;
       lng = pos.coords.longitude;
     } catch (error) {
-      
       isGhost = true;
-      
       lat = 41.3275 + (Math.random() - 0.5) * 0.1; 
       lng = 19.8187 + (Math.random() - 0.5) * 0.1;
     }
@@ -140,26 +143,43 @@ function MapEngine() {
       const ext = audioBlob.type.includes('mp4') ? 'mp4' : 'webm';
       const fileName = `${Date.now()}.${ext}`;
 
-      await supabase.storage.from('audio_pulses').upload(fileName, audioBlob, { contentType: audioBlob.type });
+      
+      const { data: storageData, error: storageError } = await supabase.storage.from('audio_pulses').upload(fileName, audioBlob, { contentType: audioBlob.type });
+      
+      if (storageError) {
+        console.error("Supabase Storage Error:", storageError);
+        alert(`⚠️ Gabim në ruajtjen e zërit! Sigurohu që Storage 'audio_pulses' është Public. Error: ${storageError.message}`);
+        setUploadStep('idle');
+        return;
+      }
+
       const { data: url } = supabase.storage.from('audio_pulses').getPublicUrl(fileName);
       
-      const { data } = await supabase.from('pulses').insert([{ 
-        lat: lat, lng: lng, energy_value: peakEnergy, 
+      // 4. Kontrollojmë nëse Databaza e pranon rreshtin
+      const { data, error: dbError } = await supabase.from('pulses').insert([{ 
+        lat: lat, lng: lng, energy_value: peakEnergy || 0.5, // Default 0.5 nqs është 0
         audio_url: url.publicUrl, category: cat, respect_count: 0 
       }]).select();
+      
+      if (dbError) {
+        console.error("Supabase DB Error:", dbError);
+        alert(`⚠️ Gabim në databazë! Kontrollo lejet RLS. Error: ${dbError.message}`);
+        setUploadStep('idle');
+        return;
+      }
       
       if (data) {
         setPulses(prev => [data[0], ...prev]);
         const newMyPulses = [...myPulses, data[0].id];
         setMyPulses(newMyPulses); localStorage.setItem('myPulses', JSON.stringify(newMyPulses));
         
-        
         if (isGhost) {
           alert("👻 GPS ishte i fikur! Zëri yt u lëshua si 'Fantazmë' në një lokacion të rastësishëm.");
         }
       }
     } catch (error) {
-      alert("⚠️ Ndodhi një problem me serverin. Provo sërish.");
+      console.error("Gabim i panjohur:", error);
+      alert("⚠️ Ndodhi një problem i panjohur. Provo sërish.");
     }
     
     setUploadStep('idle');
