@@ -20,7 +20,6 @@ const CITIES = [
   { name: 'Korçë', lat: 40.6143, lng: 20.7778 }, { name: 'Elbasan', lat: 41.1102, lng: 20.0867 }
 ];
 
-
 const CITY_PHRASES: Record<string, string> = {
   'Tiranë': 'Po bëhet nami në Tiranë 🔥',
   'Durrës': 'Durrësi po flet 🌊',
@@ -67,9 +66,12 @@ function MapEngine() {
   const [activeCluster, setActiveCluster] = useState<Pulse[] | null>(null);
   const [replyTo, setReplyTo] = useState<Pulse | null>(null);
   
-  
   const [trendingMsg, setTrendingMsg] = useState<string | null>(null);
   const lastTrendingState = useRef<string>('');
+  
+  
+  const [catPos, setCatPos] = useState({ lat: 41.3275, lng: 19.8187 });
+  const [showCatModal, setShowCatModal] = useState(false);
   
   const [bounds, setBounds] = useState<[number, number, number, number] | undefined>(undefined);
   const [zoom, setZoom] = useState(7);
@@ -82,6 +84,17 @@ function MapEngine() {
   const mapRef = useRef<MapRef>(null);
   const { isRecording, liveEnergy, peakEnergy, audioBlob, startRecording, stopRecording } = useAudioPulse();
   
+  
+  useEffect(() => {
+    const catWander = setInterval(() => {
+      setCatPos(prev => ({
+        lat: prev.lat + (Math.random() - 0.5) * 0.0005,
+        lng: prev.lng + (Math.random() - 0.5) * 0.0005
+      }));
+    }, 2000);
+    return () => clearInterval(catWander);
+  }, []);
+
   useEffect(() => {
     if (audioBlob) {
       setUploadStep('category');
@@ -117,7 +130,6 @@ function MapEngine() {
     return () => clearInterval(interval);
   }, []);
 
-  
   useEffect(() => {
     if (pulses.length === 0) return;
     const counts: Record<string, number> = {};
@@ -132,12 +144,10 @@ function MapEngine() {
       const pulseCount = sorted[0][1];
       const currentState = `${topCity}-${pulseCount}`;
 
-      
       if (lastTrendingState.current !== currentState) {
         lastTrendingState.current = currentState;
         setTrendingMsg(CITY_PHRASES[topCity] || `Po bëhet nami në ${topCity} 🔥`);
 
-        
         const timer = setTimeout(() => {
           setTrendingMsg(null);
         }, 6000);
@@ -303,7 +313,6 @@ function MapEngine() {
   return (
     <main className="relative w-full h-[100dvh] bg-peaky-black overflow-hidden font-sans select-none">
       
-      {/**/}
       <AnimatePresence>
         {trendingMsg && (
           <motion.div initial={{ y: -50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: -50, opacity: 0 }}
@@ -380,7 +389,49 @@ function MapEngine() {
             </Marker>
           );
         })}
+
+        {/*  */}
+        <Marker longitude={catPos.lng} latitude={catPos.lat} anchor="bottom">
+          <motion.div 
+            animate={{ y: [0, -10, 0] }}
+            transition={{ duration: 2, repeat: Infinity }}
+            onClick={(e) => { e.stopPropagation(); setShowCatModal(true); }}
+            className="cursor-pointer text-3xl drop-shadow-[0_0_15px_rgba(255,255,255,0.8)] z-50 hover:scale-125 transition-transform"
+          >
+            🐈‍
+          </motion.div>
+        </Marker>
       </Map>
+
+      {/* */}
+      <AnimatePresence>
+        {showCatModal && (
+          <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.8, opacity: 0 }}
+            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[100] w-11/12 max-w-sm bg-peaky-charcoal/95 backdrop-blur-2xl border-2 border-peaky-gold shadow-[0_20px_50px_rgba(0,0,0,0.9)] p-5 rounded-3xl flex flex-col items-center text-center">
+            
+            <button onClick={() => setShowCatModal(false)} className="absolute top-4 right-4 text-gray-400 hover:text-white bg-black/50 p-1 rounded-full">
+              <X size={20}/>
+            </button>
+
+            <div className="w-32 h-32 rounded-full border-4 border-peaky-gold overflow-hidden mb-4 shadow-[0_0_30px_rgba(255,215,0,0.4)] bg-black flex items-center justify-center">
+              <img src="public\mini.jpeg" alt="CEO Cat" className="w-full h-full object-cover" />
+            </div>
+
+            <h2 className="text-2xl font-bold text-white mb-1 flex items-center gap-2">
+              Krye-Inxhinieri 👑
+            </h2>
+            <p className="text-sm text-gray-300 font-mono mb-4">
+              "Kam muaj të tërë pa gjumë duke parë këtë njeri që shkruan kod për 'Zërin e Rrugës'. Tani më jepni pak Respect!"
+            </p>
+
+            <div className="flex gap-4 w-full">
+              <button onClick={() => { alert("Maces iu bë qejfi! 😻"); setShowCatModal(false); }} className="flex-1 bg-peaky-gold/20 text-peaky-gold hover:bg-peaky-gold/40 py-2 rounded-xl font-bold border border-peaky-gold transition-colors">
+                Jepi Respect 🔥
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {activePulse && !activeCluster && (
