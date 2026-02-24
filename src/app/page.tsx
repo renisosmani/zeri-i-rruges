@@ -69,7 +69,6 @@ function MapEngine() {
   const [trendingMsg, setTrendingMsg] = useState<string | null>(null);
   const lastTrendingState = useRef<string>('');
   
-  
   const [catPos, setCatPos] = useState({ lat: 41.3275, lng: 19.8187 });
   const [showCatModal, setShowCatModal] = useState(false);
   
@@ -84,14 +83,23 @@ function MapEngine() {
   const mapRef = useRef<MapRef>(null);
   const { isRecording, liveEnergy, peakEnergy, audioBlob, startRecording, stopRecording } = useAudioPulse();
   
-  
   useEffect(() => {
     const catWander = setInterval(() => {
-      setCatPos(prev => ({
-        lat: prev.lat + (Math.random() - 0.5) * 0.0005,
-        lng: prev.lng + (Math.random() - 0.5) * 0.0005
-      }));
-    }, 2000);
+      setCatPos(prev => {
+        
+        let newLat = prev.lat + (Math.random() - 0.5) * 0.08;
+        let newLng = prev.lng + (Math.random() - 0.5) * 0.08;
+
+        
+        if (newLat < 39.5) newLat = 39.5;
+        if (newLat > 43.0) newLat = 43.0;
+        if (newLng < 18.5) newLng = 18.5;
+        if (newLng > 21.5) newLng = 21.5;
+
+        return { lat: newLat, lng: newLng };
+      });
+    }, 10000);
+    
     return () => clearInterval(catWander);
   }, []);
 
@@ -390,20 +398,20 @@ function MapEngine() {
           );
         })}
 
-        {/*  */}
+        {/* */}
         <Marker longitude={catPos.lng} latitude={catPos.lat} anchor="bottom">
           <motion.div 
             animate={{ y: [0, -10, 0] }}
             transition={{ duration: 2, repeat: Infinity }}
             onClick={(e) => { e.stopPropagation(); setShowCatModal(true); }}
-            className="cursor-pointer text-3xl drop-shadow-[0_0_15px_rgba(255,255,255,0.8)] z-50 hover:scale-125 transition-transform"
+            
+            className="cursor-pointer text-xl drop-shadow-[0_0_8px_rgba(255,255,255,0.6)] z-50 hover:scale-125 transition-transform"
           >
             🐈‍
           </motion.div>
         </Marker>
       </Map>
 
-      {/* */}
       <AnimatePresence>
         {showCatModal && (
           <motion.div initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.8, opacity: 0 }}
@@ -414,7 +422,8 @@ function MapEngine() {
             </button>
 
             <div className="w-32 h-32 rounded-full border-4 border-peaky-gold overflow-hidden mb-4 shadow-[0_0_30px_rgba(255,215,0,0.4)] bg-black flex items-center justify-center">
-              <img src="public\mini.jpeg" alt="CEO Cat" className="w-full h-full object-cover" />
+              {/**/}
+              <img src="/mini.jpeg" alt="mini" className="w-full h-full object-cover" />
             </div>
 
             <h2 className="text-2xl font-bold text-white mb-1 flex items-center gap-2">
