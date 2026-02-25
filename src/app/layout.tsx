@@ -1,5 +1,13 @@
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 import './globals.css'
+
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+}
 
 export const metadata: Metadata = {
   title: 'Zëri i Rrugës | Harta Anonime',
@@ -7,7 +15,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: 'Zëri i Rrugës 🎙️',
     description: 'Dikush ka lënë një zë anonim në hartë. Hape për ta dëgjuar çfarë po thuhet!',
-    url: 'https://zeri-i-rruges.vercel.app/',
+    url: 'https://zeri-i-rruges.com/',
     siteName: 'Zëri i Rrugës',
     type: 'website',
   },

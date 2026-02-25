@@ -107,9 +107,16 @@ function MapEngine() {
   }, [activeReport]);
 
   useEffect(() => {
-    setMyPulses(JSON.parse(localStorage.getItem('myPulses') || '[]'));
-    setRespectedPulses(JSON.parse(localStorage.getItem('respectedPulses') || '[]'));
-    setDeniedReports(JSON.parse(localStorage.getItem('deniedReports') || '[]'));
+    try {
+      setMyPulses(JSON.parse(localStorage.getItem('myPulses') || '[]'));
+      setRespectedPulses(JSON.parse(localStorage.getItem('respectedPulses') || '[]'));
+      setDeniedReports(JSON.parse(localStorage.getItem('deniedReports') || '[]'));
+    } catch (error) {
+      console.error("Memoria lokale e korruptuar. Po e pastrojmë...");
+      localStorage.removeItem('myPulses');
+      localStorage.removeItem('respectedPulses');
+      localStorage.removeItem('deniedReports');
+    }
     
     const fetchPulses = async () => {
       const yesterday = new Date(Date.now() - MAX_AGE_MS).toISOString();
@@ -140,7 +147,7 @@ function MapEngine() {
         }
       }).subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [activeReport, activePulse]);
+  }, []);
 
   const handlePlayPulse = (pulse: Pulse, fromAutoPlay = false) => {
     if (pulse.is_quick_report) return;
@@ -180,6 +187,20 @@ function MapEngine() {
       console.error("Gabim në audio:", err); 
     }
   };
+
+ 
+  const searchParams = useSearchParams();
+  useEffect(() => {
+    const sharedPulseId = searchParams.get('p');
+    if (sharedPulseId && pulses.length > 0 && !activePulse) {
+      const pulseToPlay = pulses.find(p => p.id === sharedPulseId);
+      if (pulseToPlay) {
+        handlePlayPulse(pulseToPlay);
+        
+        window.history.replaceState(null, '', window.location.pathname);
+      }
+    }
+  }, [searchParams, pulses]);
 
   const startAutoPlay = () => {
     if (parentsForList.length === 0) return;
@@ -238,8 +259,12 @@ function MapEngine() {
 
   
   const handleUploadWithCategory = async (cat: string) => {
-    if (!audioBlob) return;
-    setUploadStep('uploading');
+    if (!audioBlob || audioBlob.size < 1000) { 
+    alert("⚠️ Mesazhi ishte shumë i shkurtër!"); 
+    setUploadStep('idle'); 
+    setReplyTo(null); 
+    return; 
+  }
 
     let lat = 41.3275; 
     let lng = 19.8187; 
@@ -340,7 +365,24 @@ function MapEngine() {
       
       <AnimatePresence>{trendingMsg && <motion.div initial={{ y: -50 }} animate={{ y: 0 }} exit={{ y: -50 }} className="absolute top-6 left-1/2 -translate-x-1/2 z-40 bg-peaky-blood/90 px-5 py-2 rounded-full border border-red-500 text-white text-xs font-bold shadow-neon-red uppercase tracking-widest flex items-center gap-2 pointer-events-none"><Radio size={14} className="animate-pulse"/> {trendingMsg}</motion.div>}</AnimatePresence>
 
-      <Map ref={mapRef} initialViewState={{ longitude: 20.1683, latitude: 41.1533, zoom: 7, pitch: 45 }} maxBounds={ALBANIA_BOUNDS} mapStyle={MAP_STYLE} attributionControl={false} onMove={updateMapBounds} onLoad={updateMapBounds}>
+      <Map 
+        ref={mapRef} 
+        initialViewState={{ longitude: 20.1683, latitude: 41.1533, zoom: 7, pitch: 45 }} 
+        maxBounds={ALBANIA_BOUNDS} 
+        mapStyle={MAP_STYLE} 
+        attributionControl={false} 
+        onMove={updateMapBounds} 
+        onLoad={updateMapBounds}
+        onClick={() => {
+          
+          if (activePulse) {
+            currentAudioElement.current?.pause();
+            setActivePulse(null);
+            setIsAutoPlayingState(false);
+          }
+          if (activeReport) setActiveReport(null);
+        }}
+      >
         
         <Source id="lasers" type="geojson" data={lineData}>
           <Layer id="laser-lines" type="line" paint={{ 'line-color': ['get', 'color'], 'line-width': 2.5, 'line-opacity': 0.8, 'line-dasharray': [2, 2] }} />
