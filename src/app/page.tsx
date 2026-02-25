@@ -95,6 +95,9 @@ function MapEngine() {
   const [isAutoPlayingState, setIsAutoPlayingState] = useState(false);
 
   useEffect(() => {
+    
+    if (hasSeenCat) return; 
+
     const catWander = setInterval(() => {
       setCatPos(prev => {
         let newLat = prev.lat + (Math.random() - 0.5) * 0.08;
@@ -104,8 +107,9 @@ function MapEngine() {
         return { lat: newLat, lng: newLng };
       });
     }, 3000);
+    
     return () => clearInterval(catWander);
-  }, []);
+  }, [hasSeenCat]); 
 
   useEffect(() => { if (audioBlob) setUploadStep('category'); }, [audioBlob]);
 
@@ -395,18 +399,17 @@ function MapEngine() {
           );
         })}
 
-       {/**/}
-        <Marker longitude={catPos.lng} latitude={catPos.lat} anchor="bottom">
-          <div onClick={(e) => { 
-            e.stopPropagation(); 
-            if (!hasSeenCat) { 
+        {!hasSeenCat && (
+          <Marker longitude={catPos.lng} latitude={catPos.lat} anchor="bottom">
+            <div onClick={(e) => { 
+              e.stopPropagation(); 
               setShowCatModal(true); 
               setHasSeenCat(true); 
-            } 
-          }} className="cursor-pointer text-xl drop-shadow-[0_0_8px_rgba(255,255,255,0.6)] hover:scale-125 transition-transform">
-            🐈‍
-          </div>
-        </Marker>
+            }} className="cursor-pointer text-xl drop-shadow-[0_0_8px_rgba(255,255,255,0.6)] hover:scale-125 transition-transform">
+              🐈‍⬛
+            </div>
+          </Marker>
+        )}
       </Map>
 
       <AnimatePresence>
