@@ -20,15 +20,6 @@ const CITIES = [
   { name: 'Korçë', lat: 40.6143, lng: 20.7778 }, { name: 'Elbasan', lat: 41.1102, lng: 20.0867 }
 ];
 
-const CITY_PHRASES: Record<string, string> = {
-  'Tiranë': 'Po bëhet nami në Tiranë 🔥',
-  'Durrës': 'Durrësi po flet 🌊',
-  'Shkodër': 'Shkodra ka diçka për të thënë 🚲',
-  'Vlorë': 'Vlora po nxeh situatën 🌴',
-  'Korçë': 'Korça po zjen 🍎',
-  'Elbasan': 'Elbasani u ndez 🏭'
-};
-
 const NEON_COLORS = ['#f43f5e', '#a855f7', '#3b82f6', '#10b981', '#f59e0b', '#06b6d4', '#ec4899', '#8b5cf6'];
 const getColorFromId = (id: string) => {
   let hash = 0;
@@ -68,7 +59,6 @@ function MapEngine() {
   const [activeCluster, setActiveCluster] = useState<Pulse[] | null>(null);
   const [replyTo, setReplyTo] = useState<Pulse | null>(null);
   const [trendingMsg, setTrendingMsg] = useState<string | null>(null);
-  const lastTrendingState = useRef<string>('');
   const [catPos, setCatPos] = useState({ lat: 41.3275, lng: 19.8187 });
   const [showCatModal, setShowCatModal] = useState(false);
   const [hasSeenCat, setHasSeenCat] = useState(false);
@@ -146,26 +136,53 @@ function MapEngine() {
         } else if (payload.eventType === 'DELETE') {
           setPulses(prev => prev.filter(p => p.id !== payload.old.id));
           if (activeReport?.id === payload.old.id) setActiveReport(null);
+          if (activePulse?.id === payload.old.id) setActivePulse(null);
         }
       }).subscribe();
     return () => { supabase.removeChannel(channel); };
-  }, [activeReport]);
+  }, [activeReport, activePulse]);
 
-  const handlePlayPulse = async (pulse: Pulse, fromAutoPlay = false) => {
+ const handlePlayPulse = (pulse: Pulse, fromAutoPlay = false) => {
     if (pulse.is_quick_report) return;
-    if (currentAudioElement.current) { currentAudioElement.current.pause(); currentAudioElement.current.src = ""; }
-    if (!fromAutoPlay) { isAutoPlayRef.current = false; setIsAutoPlayingState(false); }
-    setActivePulse(pulse); setAudioDuration(null);
+    
+    // 1. Ndalo gjithçka tjetër MENJËHERË
+    setActiveReport(null);
+    if (currentAudioElement.current) { 
+      currentAudioElement.current.pause(); 
+      currentAudioElement.current.src = ""; 
+    }
+    
+    if (!fromAutoPlay) { 
+      isAutoPlayRef.current = false; 
+      setIsAutoPlayingState(false); 
+    }
+    
+    setActivePulse(pulse); 
+    setAudioDuration(null);
+
     try {
-      if (!audioCtxRef.current) audioCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)();
-      if (audioCtxRef.current.state === 'suspended') await audioCtxRef.current.resume();
       const audio = new Audio(pulse.audio_url);
       audio.crossOrigin = "anonymous";
+      
       audio.addEventListener('loadedmetadata', () => setAudioDuration(audio.duration));
+      
       currentAudioElement.current = audio;
-      audio.play();
-      audio.onended = () => { if (isAutoPlayRef.current) playNextInQueue(); else setActivePulse(null); };
-    } catch (err) { console.error(err); }
+    
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+        playPromise.catch(error => {
+          console.error("Audio u bllokua nga telefoni:", error);
+          
+        });
+      }
+
+      audio.onended = () => { 
+        if (isAutoPlayRef.current) playNextInQueue(); 
+        else setActivePulse(null); 
+      };
+    } catch (err) { 
+      console.error("Gabim në audio:", err); 
+    }
   };
 
   const startAutoPlay = () => {
@@ -194,7 +211,8 @@ function MapEngine() {
     if (data) {
       setPulses(prev => [data[0], ...prev]);
       const newMy = [...myPulses, data[0].id];
-      setMyPulses(newMy); localStorage.setItem('myPulses', JSON.stringify(newMy));
+      setMyPulses(newMy); 
+      localStorage.setItem('myPulses', JSON.stringify(newMy));
     }
   };
 
@@ -235,15 +253,26 @@ function MapEngine() {
     finally { setUploadStep('idle'); setReplyTo(null); }
   };
 
-  const handleDeleteMyPulse = async (pulseId: string, audioUrl: string) => {
-    if (!confirm("Fshi?")) return;
+  
+  const handleDeleteMyPulse = async (pulseId: string, audioUrl?: string) => {
+    if (!confirm("Je i sigurt që do ta fshish përgjithmonë?")) return;
+    if (currentAudioElement.current) currentAudioElement.current.pause();
+    
     await supabase.from('pulses').delete().eq('id', pulseId);
-    if (audioUrl) {
+    
+    if (audioUrl && audioUrl.trim() !== '') {
       const fileName = audioUrl.split('/').pop();
       if (fileName) await supabase.storage.from('audio_pulses').remove([fileName]);
     }
+    
     setPulses(prev => prev.filter(p => p.id !== pulseId));
-    setActivePulse(null); setActiveReport(null);
+    
+    const updatedMyPulses = myPulses.filter(id => id !== pulseId);
+    setMyPulses(updatedMyPulses); 
+    localStorage.setItem('myPulses', JSON.stringify(updatedMyPulses));
+    
+    setActivePulse(null); 
+    setActiveReport(null);
   };
 
   const updateMapBounds = () => {
@@ -265,25 +294,53 @@ function MapEngine() {
   const { clusters, supercluster } = useSupercluster({ points, bounds, zoom, options: { radius: 60, maxZoom: 15 } });
 
   return (
-    <main className="relative w-full h-[100dvh] bg-peaky-black overflow-hidden font-sans select-none">
+    // Bllokimi i zoom-it me touch-manipulation dhe overflow-hidden
+    <main className="relative w-full h-[100dvh] bg-peaky-black overflow-hidden font-sans select-none touch-manipulation overscroll-none">
       
-      <AnimatePresence>{trendingMsg && <motion.div initial={{ y: -50 }} animate={{ y: 0 }} exit={{ y: -50 }} className="absolute top-6 left-1/2 -translate-x-1/2 z-40 bg-peaky-blood/90 px-5 py-2 rounded-full border border-red-500 text-white text-xs font-bold shadow-neon-red uppercase tracking-widest flex items-center gap-2"><Radio size={14} className="animate-pulse"/> {trendingMsg}</motion.div>}</AnimatePresence>
+      <AnimatePresence>{trendingMsg && <motion.div initial={{ y: -50 }} animate={{ y: 0 }} exit={{ y: -50 }} className="absolute top-6 left-1/2 -translate-x-1/2 z-40 bg-peaky-blood/90 px-5 py-2 rounded-full border border-red-500 text-white text-xs font-bold shadow-neon-red uppercase tracking-widest flex items-center gap-2 pointer-events-none"><Radio size={14} className="animate-pulse"/> {trendingMsg}</motion.div>}</AnimatePresence>
 
       <Map ref={mapRef} initialViewState={{ longitude: 20.1683, latitude: 41.1533, zoom: 7, pitch: 45 }} maxBounds={ALBANIA_BOUNDS} mapStyle={MAP_STYLE} attributionControl={false} onMove={updateMapBounds} onLoad={updateMapBounds}>
         {clusters.map(cluster => {
           const [longitude, latitude] = cluster.geometry.coordinates;
           const { cluster: isCluster, point_count: ptCount } = cluster.properties as any;
-          if (isCluster) return <Marker key={cluster.id} longitude={longitude} latitude={latitude}><div onClick={() => setActiveCluster(supercluster?.getLeaves(cluster.id as number, Infinity).map(l => l.properties as Pulse) || null)} className="w-10 h-10 bg-peaky-charcoal border-2 border-peaky-blood rounded-full flex items-center justify-center text-white font-bold text-xs shadow-lg cursor-pointer">{ptCount}</div></Marker>;
+          
+          if (isCluster) return <Marker key={cluster.id} longitude={longitude} latitude={latitude}><div onClick={(e) => { e.stopPropagation(); setActiveCluster(supercluster?.getLeaves(cluster.id as number, Infinity).map(l => l.properties as Pulse) || null); }} className="w-10 h-10 bg-peaky-charcoal border-2 border-peaky-blood rounded-full flex items-center justify-center text-white font-bold text-xs shadow-lg cursor-pointer">{ptCount}</div></Marker>;
+          
           const pulse = cluster.properties as Pulse;
-          if (pulse.is_quick_report) return <Marker key={pulse.id} longitude={longitude} latitude={latitude} anchor="bottom"><motion.div whileHover={{ scale: 1.1 }} onClick={() => setActiveReport(pulse)} className={`cursor-pointer text-2xl p-2 rounded-full bg-black/40 border border-white/20 backdrop-blur-sm shadow-xl ${pulse.category === '👮' ? 'animate-pulse' : ''}`}>{pulse.category}</motion.div></Marker>;
+          
+          if (pulse.is_quick_report) return <Marker key={pulse.id} longitude={longitude} latitude={latitude} anchor="bottom"><motion.div whileHover={{ scale: 1.1 }} onClick={(e) => { e.stopPropagation(); setActiveReport(pulse); setActivePulse(null); }} className={`cursor-pointer text-2xl p-2 rounded-full bg-black/40 border border-white/20 backdrop-blur-sm shadow-xl ${pulse.category === '👮' ? 'animate-pulse' : ''}`}>{pulse.category}</motion.div></Marker>;
+          
           const mood = getMoodStyle(pulse.energy_value);
-          return <Marker key={pulse.id} longitude={longitude} latitude={latitude} anchor="bottom"><div className="flex flex-col items-center cursor-pointer" onClick={() => handlePlayPulse(pulse)}><span className="text-2xl mb-1">{pulse.category}</span><div className="w-4 h-4 rounded-full border-2 border-white" style={{ backgroundColor: mood.color, boxShadow: `0 0 15px ${mood.color}` }} /></div></Marker>;
+          return <Marker key={pulse.id} longitude={longitude} latitude={latitude} anchor="bottom"><div className="flex flex-col items-center cursor-pointer" onClick={(e) => { e.stopPropagation(); handlePlayPulse(pulse); }}><span className="text-2xl mb-1">{pulse.category}</span><div className="w-4 h-4 rounded-full border-2 border-white" style={{ backgroundColor: mood.color, boxShadow: `0 0 15px ${mood.color}` }} /></div></Marker>;
         })}
         {!hasSeenCat && <Marker longitude={catPos.lng} latitude={catPos.lat} anchor="bottom"><div onClick={(e) => { e.stopPropagation(); setShowCatModal(true); setHasSeenCat(true); }} className="cursor-pointer text-xl drop-shadow-neon hover:scale-125 transition-transform">🐈‍⬛</div></Marker>}
       </Map>
 
+      {/*  */}
+      <AnimatePresence>
+        {activePulse && !showGlobalList && !activeReport && (
+          <motion.div initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 50, opacity: 0 }} className="absolute bottom-32 left-1/2 -translate-x-1/2 z-50 w-11/12 max-w-sm bg-peaky-charcoal/95 backdrop-blur-xl border border-peaky-steel p-4 rounded-3xl flex items-center gap-4 shadow-2xl">
+            <div className="text-4xl">{activePulse.category}</div>
+            <div className="flex-1">
+              <div className="flex justify-between items-center mb-1">
+                <span className="text-[10px] text-gray-500 font-mono flex items-center gap-1"><Clock size={10}/>{getTimeAgo(activePulse.created_at)}</span>
+                {audioDuration && <span className="text-xs text-peaky-gold font-bold">{Math.round(audioDuration)}s</span>}
+              </div>
+              <div className="flex items-center gap-3 mt-2">
+                <button onClick={(e) => { e.stopPropagation(); handleGiveRespect(activePulse.id); }} className={`flex items-center gap-1 text-xs font-bold px-2 py-1 rounded ${respectedPulses.includes(activePulse.id) ? 'text-orange-400 bg-orange-500/10' : 'text-gray-400 hover:text-white'}`}><Flame size={12}/> {activePulse.respect_count}</button>
+                <button onClick={(e) => { e.stopPropagation(); setReplyTo(activePulse); startRecording(); }} className="text-blue-400 bg-blue-500/10 p-1.5 rounded-md hover:bg-blue-500/20"><MessageCircle size={14}/></button>
+                <button onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(`${window.location.origin}?p=${activePulse.id}`); alert("Linku u kopjua!"); }} className="text-gray-400 bg-gray-800 p-1.5 rounded-md hover:text-white"><Share2 size={14}/></button>
+                {myPulses.includes(activePulse.id) && <button onClick={(e) => { e.stopPropagation(); handleDeleteMyPulse(activePulse.id, activePulse.audio_url); }} className="text-red-500 bg-red-500/10 p-1.5 rounded-md hover:bg-red-500/20 ml-auto"><Trash2 size={14}/></button>}
+              </div>
+            </div>
+            <button onClick={(e) => { e.stopPropagation(); currentAudioElement.current?.pause(); setActivePulse(null); setIsAutoPlayingState(false); }} className="w-10 h-10 bg-peaky-blood text-white rounded-full flex items-center justify-center shadow-neon-red"><Square size={14} fill="white"/></button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* */}
       <AnimatePresence>{activeReport && (
-        <motion.div initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 50 }} className="absolute bottom-32 left-1/2 -translate-x-1/2 z-50 w-11/12 max-w-sm bg-peaky-charcoal/95 backdrop-blur-xl border border-peaky-steel p-5 rounded-3xl text-center shadow-2xl">
+        <motion.div initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 50, opacity: 0 }} className="absolute bottom-32 left-1/2 -translate-x-1/2 z-50 w-11/12 max-w-sm bg-peaky-charcoal/95 backdrop-blur-xl border border-peaky-steel p-5 rounded-3xl text-center shadow-2xl">
           <button onClick={() => setActiveReport(null)} className="absolute top-4 right-4 text-gray-500"><X/></button>
           <div className="text-5xl mb-2">{activeReport.category}</div>
           <h2 className="text-white font-bold text-lg mb-4">{activeReport.category === '👮' ? 'Polici' : 'Trafik'} në {reportAddress}</h2>
@@ -291,7 +348,7 @@ function MapEngine() {
             <button onClick={() => handleGiveRespect(activeReport.id)} className={`flex-1 py-3 rounded-2xl border flex flex-col items-center ${respectedPulses.includes(activeReport.id) ? 'bg-green-500/10 border-green-500/30 text-green-500 cursor-not-allowed' : 'bg-black border-peaky-steel text-gray-300'}`}><CheckCircle2 size={24}/><span className="text-xs font-bold mt-1">Konfirmo (x{activeReport.respect_count})</span></button>
             <button onClick={() => handleDenyReport(activeReport)} className={`flex-1 py-3 rounded-2xl border flex flex-col items-center ${deniedReports.includes(activeReport.id) ? 'bg-red-500/10 border-red-500/30 text-red-500 cursor-not-allowed' : 'bg-black border-peaky-steel text-gray-300'}`}><XCircle size={24}/><span className="text-xs font-bold mt-1">S'ka Gjë ({activeReport.deny_count || 0}/5)</span></button>
           </div>
-          {myPulses.includes(activeReport.id) && <button onClick={() => handleDeleteMyPulse(activeReport.id, '')} className="mt-4 text-red-500 text-xs flex items-center justify-center gap-1"><Trash2 size={12}/> Fshi Raportimin Tim</button>}
+          {myPulses.includes(activeReport.id) && <button onClick={(e) => { e.stopPropagation(); handleDeleteMyPulse(activeReport.id, ''); }} className="mt-4 text-red-500 text-xs flex items-center justify-center gap-1 w-full bg-red-500/10 py-2 rounded-xl"><Trash2 size={14}/> Fshi Raportimin Tim</button>}
         </motion.div>
       )}</AnimatePresence>
 
@@ -299,8 +356,8 @@ function MapEngine() {
         <motion.div initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} className="absolute inset-0 z-[60] bg-peaky-black/98 backdrop-blur-3xl flex flex-col">
           <div className="pt-12 pb-4 px-6 flex justify-between items-center border-b border-peaky-steel/30"><div><h1 className="text-white text-xl font-bold">Top Zërat</h1><p className="text-gray-500 text-[10px] font-mono uppercase tracking-widest">{parentsForList.length} LIVE</p></div><button onClick={() => setShowGlobalList(false)} className="p-2 bg-gray-800 rounded-full text-gray-400"><X/></button></div>
           <div className="p-4"><button onClick={isAutoPlayingState ? () => { isAutoPlayRef.current = false; setIsAutoPlayingState(false); currentAudioElement.current?.pause(); setActivePulse(null); } : startAutoPlay} className={`w-full py-3 rounded-2xl font-bold flex items-center justify-center gap-2 transition-all ${isAutoPlayingState ? 'bg-peaky-blood text-white animate-pulse shadow-neon-red' : 'bg-peaky-gold/10 text-peaky-gold border border-peaky-gold/30'}`}>{isAutoPlayingState ? <Square fill="white" size={16}/> : <PlayCircle fill="currentColor" size={20}/>} {isAutoPlayingState ? 'Ndalo Radion' : 'Radio Mode'}</button></div>
-          <div className="flex-1 overflow-y-auto px-4 pb-20 space-y-3">{parentsForList.map((p, idx) => (
-            <div key={p.id} onClick={() => handlePlayPulse(p)} className={`p-4 rounded-2xl flex items-center gap-4 border transition-all ${activePulse?.id === p.id ? 'bg-peaky-blood/10 border-peaky-blood shadow-neon-red' : 'bg-peaky-charcoal/30 border-peaky-steel/30'}`}><span className="text-3xl relative">{p.category}{idx === 0 && <span className="absolute -top-2 -right-2 text-xs">👑</span>}</span><div className="flex-1"><div className="flex justify-between items-center text-white font-bold text-sm"><span>{getNearestCity(p.lat, p.lng)}</span><span className="text-[10px] text-gray-500 font-mono">{getTimeAgo(p.created_at)}</span></div><div className="flex gap-3 mt-1 items-center"><span className="text-peaky-gold text-[10px] flex items-center gap-1 font-bold"><Flame size={10}/> {p.respect_count}</span>{myPulses.includes(p.id) && <button onClick={(e) => { e.stopPropagation(); handleDeleteMyPulse(p.id, p.audio_url); }} className="text-red-500"><Trash2 size={12}/></button>}</div></div><div className="w-8 h-8 rounded-full bg-gray-800 flex items-center justify-center text-gray-400">{activePulse?.id === p.id ? <div className="w-2 h-2 bg-peaky-blood animate-ping rounded-full"/> : <Play size={12}/>}</div></div>
+          <div className="flex-1 overflow-y-auto px-4 pb-20 space-y-3 custom-scrollbar">{parentsForList.map((p, idx) => (
+            <div key={p.id} onClick={() => handlePlayPulse(p)} className={`p-4 rounded-2xl flex items-center gap-4 border transition-all cursor-pointer ${activePulse?.id === p.id ? 'bg-peaky-blood/10 border-peaky-blood shadow-neon-red' : 'bg-peaky-charcoal/30 border-peaky-steel/30'}`}><span className="text-3xl relative">{p.category}{idx === 0 && <span className="absolute -top-2 -right-2 text-xs">👑</span>}</span><div className="flex-1"><div className="flex justify-between items-center text-white font-bold text-sm"><span>{getNearestCity(p.lat, p.lng)}</span><span className="text-[10px] text-gray-500 font-mono">{getTimeAgo(p.created_at)}</span></div><div className="flex gap-3 mt-1 items-center"><span className="text-peaky-gold text-[10px] flex items-center gap-1 font-bold"><Flame size={10}/> {p.respect_count}</span>{myPulses.includes(p.id) && <button onClick={(e) => { e.stopPropagation(); handleDeleteMyPulse(p.id, p.audio_url); }} className="text-red-500"><Trash2 size={12}/></button>}</div></div><div className="w-8 h-8 rounded-full bg-gray-800 flex items-center justify-center text-gray-400">{activePulse?.id === p.id ? <div className="w-2 h-2 bg-peaky-blood animate-ping rounded-full"/> : <Play size={12}/>}</div></div>
           ))}</div>
         </motion.div>
       )}</AnimatePresence>
@@ -308,7 +365,7 @@ function MapEngine() {
       <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-40 w-11/12 max-w-lg flex items-end justify-between gap-3">
         <button onClick={() => setShowGlobalList(true)} className="w-14 h-14 bg-peaky-charcoal border-2 border-peaky-steel rounded-2xl flex flex-col items-center justify-center text-gray-400 shadow-2xl transition-all hover:border-peaky-gold"><List size={22} /><span className="text-[8px] font-bold mt-1">RADIO</span></button>
         <div className="flex-1 relative">
-          <AnimatePresence>{replyTo && <motion.div initial={{ y: 10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} className="absolute -top-12 left-0 right-0 flex justify-center"><div className="bg-peaky-blood text-white text-[10px] font-bold px-3 py-1.5 rounded-full flex items-center gap-2 shadow-neon-red">Reply to {replyTo.category} <X size={10} onClick={() => setReplyTo(null)}/></div></motion.div>}</AnimatePresence>
+          <AnimatePresence>{replyTo && <motion.div initial={{ y: 10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 10, opacity: 0 }} className="absolute -top-12 left-0 right-0 flex justify-center"><div className="bg-peaky-blood text-white text-[10px] font-bold px-3 py-1.5 rounded-full flex items-center gap-2 shadow-neon-red">Reply to {replyTo.category} <X size={10} className="cursor-pointer" onClick={() => setReplyTo(null)}/></div></motion.div>}</AnimatePresence>
           {isRecording && <div className="absolute -top-4 left-0 right-0 flex justify-center"><motion.div className="h-1 bg-peaky-gold rounded-full shadow-neon-gold" animate={{ width: `${liveEnergy * 100}%` }} /></div>}
           {uploadStep === 'category' ? (
             <div className="flex justify-around bg-peaky-charcoal p-2 rounded-2xl border-2 border-peaky-steel shadow-2xl h-14 items-center">{['💬', '🎸', '🚨'].map(c => <button key={c} onClick={() => handleUploadWithCategory(c)} className="text-2xl hover:scale-125 transition-transform px-3">{c}</button>)}</div>
@@ -322,32 +379,23 @@ function MapEngine() {
         </div>
       </div>
 
-      <AnimatePresence>{activePulse && !showGlobalList && !activeReport && (
-        <motion.div initial={{ y: 50 }} animate={{ y: 0 }} exit={{ y: 50 }} className="absolute bottom-32 left-1/2 -translate-x-1/2 z-50 w-11/12 max-w-sm bg-peaky-charcoal/95 backdrop-blur-xl border border-peaky-steel p-4 rounded-3xl flex items-center gap-4 shadow-2xl">
-          <div className="text-4xl">{activePulse.category}</div>
-          <div className="flex-1">
-            <div className="flex justify-between items-center mb-1"><span className="text-[10px] text-gray-500 font-mono"><Clock size={10} className="inline mr-1"/>{getTimeAgo(activePulse.created_at)}</span>{audioDuration && <span className="text-xs text-peaky-gold font-bold">{Math.round(audioDuration)}s</span>}</div>
-            <div className="flex items-center gap-3">
-              <button onClick={() => handleGiveRespect(activePulse.id)} className={`flex items-center gap-1 text-xs font-bold px-2 py-1 rounded ${respectedPulses.includes(activePulse.id) ? 'text-orange-400 bg-orange-500/10' : 'text-gray-400'}`}><Flame size={12}/> {activePulse.respect_count}</button>
-              <button onClick={() => { setReplyTo(activePulse); startRecording(); }} className="text-blue-400"><MessageCircle size={14}/></button>
-              <button onClick={() => { navigator.clipboard.writeText(`${window.location.origin}?p=${activePulse.id}`); alert("Copied!"); }} className="text-gray-400"><Share2 size={14}/></button>
-              {myPulses.includes(activePulse.id) && <button onClick={() => handleDeleteMyPulse(activePulse.id, activePulse.audio_url)} className="text-red-500"><Trash2 size={14}/></button>}
-            </div>
-          </div>
-          <button onClick={() => { currentAudioElement.current?.pause(); setActivePulse(null); setIsAutoPlayingState(false); }} className="w-10 h-10 bg-peaky-blood text-white rounded-full flex items-center justify-center shadow-neon-red"><Square size={14} fill="white"/></button>
-        </motion.div>
-      )}</AnimatePresence>
-
-      <AnimatePresence>{showCatModal && (
-        <motion.div initial={{ scale: 0.8 }} animate={{ scale: 1 }} exit={{ scale: 0.8 }} className="absolute inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-md p-6">
-          <div className="bg-peaky-charcoal border-2 border-peaky-gold p-8 rounded-3xl text-center max-w-xs shadow-neon-gold">
+     <AnimatePresence>
+        {showCatModal && (
+          <motion.div 
+            initial={{ scale: 0.8, opacity: 0 }} 
+            animate={{ scale: 1, opacity: 1 }} 
+            exit={{ scale: 0.8, opacity: 0 }} 
+            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[100] w-80 bg-peaky-charcoal border-2 border-peaky-gold p-6 rounded-3xl text-center shadow-neon-gold"
+          >
             <img src="/mini.jpeg" className="w-24 h-24 rounded-full mx-auto mb-4 border-2 border-peaky-gold object-cover" />
             <h2 className="text-white font-bold text-xl mb-2">Krye-Inxhinieri Mini 👑</h2>
-            <p className="text-gray-400 text-xs mb-6 italic">"Kam shijuar gjithë rrugëtimin e programimit duke fjetur mbi tastierë! 💤⌨️"</p>
-            <button onClick={() => setShowCatModal(false)} className="w-full py-3 bg-peaky-gold text-black font-bold rounded-xl uppercase tracking-widest text-xs">Mbyll Easter Egg</button>
-          </div>
-        </motion.div>
-      )}</AnimatePresence>
+            <p className="text-gray-400 text-sm mb-6 italic">"Kam shijuar gjithë rrugëtimin e programimit duke fjetur mbi tastierë! 💤⌨️"</p>
+            <button onClick={() => setShowCatModal(false)} className="w-full py-2 bg-peaky-gold text-black font-bold rounded-xl uppercase tracking-widest text-xs transition-transform hover:scale-105">
+              Mbylle
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
     </main>
   );
