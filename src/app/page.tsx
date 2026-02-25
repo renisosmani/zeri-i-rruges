@@ -285,9 +285,22 @@ function MapEngine() {
   };
 
   const handleGiveRespect = async (id: string) => {
-    if (respectedPulses.includes(id)) return;
+    
+    if (respectedPulses.includes(id)) {
+      alert("Ju keni dhënë tashmë konfirmimin/respektin për këtë zë!");
+      return;
+    }
+
+    // Ruajme direkt voten ne state dhe localStorage qe te mos e shtype prap shpejt
+
+    const newRespectedList = [...respectedPulses, id];
+    setRespectedPulses(newRespectedList);
+    localStorage.setItem('respectedPulses', JSON.stringify(newRespectedList));
     const { error } = await supabase.rpc('increment_respect', { row_id: id });
-    if (!error) setRespectedPulses(prev => [...prev, id]);
+    if (error) {
+      console.error("Gabim gjatë konfirmimit:", error);
+    }
+  
   };
 
   const handleDeleteMyPulse = async (pulseId: string, audioUrl: string) => {
@@ -344,13 +357,15 @@ function MapEngine() {
             );
           }
           const pulse = cluster.properties as Pulse;
-          
-          // EMOJI SPECIFIKE PER RAPORTIMET E SHPEJTA
+
           if (pulse.is_quick_report) {
             return (
               <Marker key={pulse.id} longitude={longitude} latitude={latitude} anchor="bottom">
-                <motion.div whileHover={{ scale: 1.2 }} onClick={() => setActiveReport(pulse)}
-                  className={`cursor-pointer text-4xl drop-shadow-[0_0_20px_${pulse.category === '👮' ? 'rgba(239,68,68,0.8)' : 'rgba(245,158,11,0.8)'}] ${pulse.category === '👮' ? 'animate-pulse' : ''}`}>
+                <motion.div 
+                  whileHover={{ scale: 1.1 }} 
+                  onClick={() => setActiveReport(pulse)}
+                  className={`cursor-pointer text-2xl p-2 rounded-full bg-black/40 border border-white/20 backdrop-blur-sm shadow-xl ${pulse.category === '👮' ? 'animate-pulse' : ''}`}
+                >
                   {pulse.category}
                 </motion.div>
               </Marker>
@@ -396,7 +411,14 @@ function MapEngine() {
             </div>
 
             <div className="flex gap-3 w-full mb-2">
-              <button onClick={() => handleGiveRespect(activeReport.id)} className={`flex-1 py-3 rounded-2xl border flex flex-col items-center justify-center transition-all ${respectedPulses.includes(activeReport.id) ? 'bg-green-500/10 border-green-500/30 text-green-500' : 'bg-peaky-black border-peaky-steel text-gray-300 hover:border-green-500 hover:text-green-400'}`}>
+              <button 
+                onClick={() => handleGiveRespect(activeReport.id)} 
+                className={`flex-1 py-3 rounded-2xl border flex flex-col items-center justify-center transition-all ${
+                  respectedPulses.includes(activeReport.id) 
+                    ? 'bg-green-500/10 border-green-500/30 text-green-500 cursor-not-allowed' 
+                    : 'bg-peaky-black border-peaky-steel text-gray-300 hover:border-green-500 hover:text-green-400'
+                }`}
+              >
                 <CheckCircle2 size={24} className="mb-1" />
                 <span className="font-bold text-sm">Konfirmo</span>
                 <span className="text-[10px] opacity-70">x{activeReport.respect_count} njerëz</span>
