@@ -73,6 +73,7 @@ function MapEngine() {
   
   const [catPos, setCatPos] = useState({ lat: 41.3275, lng: 19.8187 });
   const [showCatModal, setShowCatModal] = useState(false);
+  const [hasSeenCat, setHasSeenCat] = useState(false);
   const [showGlobalList, setShowGlobalList] = useState(false);
   
   const [bounds, setBounds] = useState<[number, number, number, number] | undefined>(undefined);
@@ -113,7 +114,6 @@ function MapEngine() {
     setMyPulses(JSON.parse(localStorage.getItem('myPulses') || '[]'));
     setRespectedPulses(JSON.parse(localStorage.getItem('respectedPulses') || '[]'));
     
-    
     const fetchPulses = async () => {
       const yesterday = new Date(Date.now() - MAX_AGE_MS).toISOString();
       const { data } = await supabase.from('pulses').select('*').gte('created_at', yesterday).order('created_at', { ascending: false });
@@ -131,24 +131,23 @@ function MapEngine() {
     
     fetchPulses();
 
-    
     const channel = supabase
       .channel('realtime_pulses')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'pulses' }, (payload) => {
         if (payload.eventType === 'INSERT') {
           
-          setPulses(prev => [payload.new as Pulse, ...prev]);
+          setPulses(prev => {
+            if (prev.some(p => p.id === payload.new.id)) return prev;
+            return [payload.new as Pulse, ...prev];
+          });
         } else if (payload.eventType === 'UPDATE') {
-          
           setPulses(prev => prev.map(p => p.id === payload.new.id ? payload.new as Pulse : p));
         } else if (payload.eventType === 'DELETE') {
-          
           setPulses(prev => prev.filter(p => p.id !== payload.old.id));
         }
       })
       .subscribe();
 
-   
     return () => {
       supabase.removeChannel(channel);
     };
@@ -241,6 +240,7 @@ function MapEngine() {
     }
   };
 
+  // RREGULLIMI I RAPORTIMIT TE SHPEJTE (FIXED)
   const handleQuickReport = async (type: '🚨' | '🚗') => {
     let lat = 41.3275; let lng = 19.8187;
     try {
@@ -256,7 +256,10 @@ function MapEngine() {
 
     if (!error && data) {
       
+      setPulses(prev => [data[0], ...prev]);
       alert(`${type === '🚨' ? 'Policia' : 'Trafiku'} u raportua me sukses!`);
+    } else if (error) {
+      alert("Gabim gjatë raportimit: " + error.message);
     }
   };
 
@@ -291,6 +294,7 @@ function MapEngine() {
       }]).select();
       if (data) {
         
+        setPulses(prev => [data[0], ...prev]);
         const newMyPulses = [...myPulses, data[0].id];
         setMyPulses(newMyPulses); localStorage.setItem('myPulses', JSON.stringify(newMyPulses));
       }
@@ -314,7 +318,6 @@ function MapEngine() {
     await supabase.from('pulses').delete().eq('id', pulseId);
     const fileName = audioUrl.split('/').pop();
     if (fileName) await supabase.storage.from('audio_pulses').remove([fileName]);
-    
     const updatedMyPulses = myPulses.filter(id => id !== pulseId);
     setMyPulses(updatedMyPulses);
     localStorage.setItem('myPulses', JSON.stringify(updatedMyPulses));
@@ -392,8 +395,17 @@ function MapEngine() {
           );
         })}
 
+       {/**/}
         <Marker longitude={catPos.lng} latitude={catPos.lat} anchor="bottom">
-          <div onClick={() => setShowCatModal(true)} className="cursor-pointer text-xl drop-shadow-[0_0_8px_rgba(255,255,255,0.6)] hover:scale-125 transition-transform">🐈‍⬛</div>
+          <div onClick={(e) => { 
+            e.stopPropagation(); 
+            if (!hasSeenCat) { 
+              setShowCatModal(true); 
+              setHasSeenCat(true); 
+            } 
+          }} className="cursor-pointer text-xl drop-shadow-[0_0_8px_rgba(255,255,255,0.6)] hover:scale-125 transition-transform">
+            🐈‍
+          </div>
         </Marker>
       </Map>
 
@@ -477,7 +489,8 @@ function MapEngine() {
             className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[100] w-80 bg-peaky-charcoal border-2 border-peaky-gold p-6 rounded-3xl text-center">
             <img src="/mini.jpeg" className="w-24 h-24 rounded-full mx-auto mb-4 border-2 border-peaky-gold object-cover" />
             <h2 className="text-white font-bold text-xl mb-2">Krye-Inxhinieri Mini 👑</h2>
-            <p className="text-gray-400 text-sm mb-4">"Mjaft me polici, më jepni pak peshk!"</p>
+            {/* */}
+            <p className="text-gray-400 text-sm mb-4">"Kam shijuar gjithë rrugëtimin e programimit duke fjetur mbi tastierë! 💤⌨️"</p>
             <button onClick={() => setShowCatModal(false)} className="w-full py-2 bg-peaky-gold text-black font-bold rounded-xl">Mbyll</button>
           </motion.div>
         )}
