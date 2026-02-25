@@ -142,10 +142,9 @@ function MapEngine() {
     return () => { supabase.removeChannel(channel); };
   }, [activeReport, activePulse]);
 
- const handlePlayPulse = (pulse: Pulse, fromAutoPlay = false) => {
+  const handlePlayPulse = (pulse: Pulse, fromAutoPlay = false) => {
     if (pulse.is_quick_report) return;
     
-    // 1. Ndalo gjithçka tjetër MENJËHERË
     setActiveReport(null);
     if (currentAudioElement.current) { 
       currentAudioElement.current.pause(); 
@@ -160,20 +159,17 @@ function MapEngine() {
     setActivePulse(pulse); 
     setAudioDuration(null);
 
+    if (!pulse.audio_url) return;
+
     try {
       const audio = new Audio(pulse.audio_url);
       audio.crossOrigin = "anonymous";
-      
       audio.addEventListener('loadedmetadata', () => setAudioDuration(audio.duration));
-      
       currentAudioElement.current = audio;
     
       const playPromise = audio.play();
       if (playPromise !== undefined) {
-        playPromise.catch(error => {
-          console.error("Audio u bllokua nga telefoni:", error);
-          
-        });
+        playPromise.catch(error => { console.error("Audio u bllokua nga telefoni:", error); });
       }
 
       audio.onended = () => { 
@@ -207,8 +203,9 @@ function MapEngine() {
       const pos = await new Promise<GeolocationPosition>((res, rej) => { navigator.geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: true, timeout: 5000 }); });
       lat = pos.coords.latitude; lng = pos.coords.longitude;
     } catch (e) { alert("Ndez GPS!"); return; }
+    
     const { data } = await supabase.from('pulses').insert([{ lat, lng, energy_value: 1, category: type, respect_count: 1, deny_count: 0, is_quick_report: true, audio_url: '' }]).select();
-    if (data) {
+    if (data && data.length > 0) {
       setPulses(prev => [data[0], ...prev]);
       const newMy = [...myPulses, data[0].id];
       setMyPulses(newMy); 
@@ -222,8 +219,13 @@ function MapEngine() {
     const newDeniedList = [...deniedReports, pulse.id];
     setDeniedReports(newDeniedList);
     localStorage.setItem('deniedReports', JSON.stringify(newDeniedList));
-    if (newDeny >= 5) { await supabase.from('pulses').delete().eq('id', pulse.id); setActiveReport(null); }
-    else { await supabase.from('pulses').update({ deny_count: newDeny }).eq('id', pulse.id); }
+    
+    if (newDeny >= 5) { 
+      await supabase.from('pulses').delete().eq('id', pulse.id); 
+      setActiveReport(null); 
+    } else { 
+      await supabase.from('pulses').update({ deny_count: newDeny }).eq('id', pulse.id); 
+    }
   };
 
   const handleGiveRespect = async (id: string) => {
@@ -234,28 +236,66 @@ function MapEngine() {
     await supabase.rpc('increment_respect', { row_id: id });
   };
 
+  
   const handleUploadWithCategory = async (cat: string) => {
     if (!audioBlob) return;
     setUploadStep('uploading');
+
+    let lat = 41.3275; 
+    let lng = 19.8187; 
+    let isGhost = false;
+
     try {
-      const pos = await new Promise<GeolocationPosition>((res, rej) => { navigator.geolocation.getCurrentPosition(res, rej, { timeout: 5000 }); });
-      const lat = pos.coords.latitude; const lng = pos.coords.longitude;
-      const fileName = `${Date.now()}.webm`;
-      await supabase.storage.from('audio_pulses').upload(fileName, audioBlob);
+      const pos = await new Promise<GeolocationPosition>((res, rej) => { 
+        navigator.geolocation.getCurrentPosition(res, rej, { timeout: 4000, enableHighAccuracy: true }); 
+      });
+      lat = pos.coords.latitude; 
+      lng = pos.coords.longitude;
+    } catch (e) { 
+      isGhost = true; 
+      
+      lat = 41.3275 + (Math.random() - 0.5) * 0.1; 
+      lng = 19.8187 + (Math.random() - 0.5) * 0.1; 
+    }
+
+    try {
+      const ext = audioBlob.type.includes('mp4') ? 'mp4' : 'webm';
+      const fileName = `${Date.now()}.${ext}`;
+      
+      await supabase.storage.from('audio_pulses').upload(fileName, audioBlob, { contentType: audioBlob.type });
       const { data: url } = supabase.storage.from('audio_pulses').getPublicUrl(fileName);
-      const { data } = await supabase.from('pulses').insert([{ lat, lng, energy_value: peakEnergy || 0.5, audio_url: url.publicUrl, category: cat, respect_count: 0, parent_id: replyTo ? replyTo.id : null }]).select();
-      if (data) {
+      
+      const { data } = await supabase.from('pulses').insert([{ 
+        lat, 
+        lng, 
+        energy_value: peakEnergy || 0.5, 
+        audio_url: url.publicUrl, 
+        category: isGhost ? '👻' : cat, 
+        respect_count: 0, 
+        parent_id: replyTo ? replyTo.id : null,
+        is_quick_report: false,
+        deny_count: 0
+      }]).select();
+      
+      if (data && data.length > 0) {
         setPulses(prev => [data[0], ...prev]);
         const newMy = [...myPulses, data[0].id];
-        setMyPulses(newMy); localStorage.setItem('myPulses', JSON.stringify(newMy));
+        setMyPulses(newMy); 
+        localStorage.setItem('myPulses', JSON.stringify(newMy));
       }
-    } catch (e) { alert("GPS Problem!"); }
-    finally { setUploadStep('idle'); setReplyTo(null); }
+    } catch (e) { 
+      console.error(e);
+      alert("Gabim në server gjatë ngarkimit!"); 
+    } finally { 
+      setUploadStep('idle'); 
+      setReplyTo(null); 
+    }
   };
 
   
   const handleDeleteMyPulse = async (pulseId: string, audioUrl?: string) => {
-    if (!confirm("Je i sigurt që do ta fshish përgjithmonë?")) return;
+    if (!confirm("Je i sigurt që do ta fshish?")) return;
+    
     if (currentAudioElement.current) currentAudioElement.current.pause();
     
     await supabase.from('pulses').delete().eq('id', pulseId);
@@ -292,14 +332,20 @@ function MapEngine() {
 
   const points = pulses.map(pulse => ({ type: 'Feature' as const, properties: { cluster: false, ...pulse }, geometry: { type: 'Point' as const, coordinates: [pulse.lng, pulse.lat] as [number, number] } }));
   const { clusters, supercluster } = useSupercluster({ points, bounds, zoom, options: { radius: 60, maxZoom: 15 } });
+  
+  const lineData = { type: 'FeatureCollection' as const, features: pulses.filter(p => p.parent_id).map(child => { const parent = pulses.find(p => p.id === child.parent_id); if (!parent) return null; return { type: 'Feature' as const, properties: { color: getColorFromId(parent.id) }, geometry: { type: 'LineString' as const, coordinates: [[child.lng, child.lat], [parent.lng, parent.lat]] } }; }).filter(Boolean) as any };
 
   return (
-    // Bllokimi i zoom-it me touch-manipulation dhe overflow-hidden
     <main className="relative w-full h-[100dvh] bg-peaky-black overflow-hidden font-sans select-none touch-manipulation overscroll-none">
       
       <AnimatePresence>{trendingMsg && <motion.div initial={{ y: -50 }} animate={{ y: 0 }} exit={{ y: -50 }} className="absolute top-6 left-1/2 -translate-x-1/2 z-40 bg-peaky-blood/90 px-5 py-2 rounded-full border border-red-500 text-white text-xs font-bold shadow-neon-red uppercase tracking-widest flex items-center gap-2 pointer-events-none"><Radio size={14} className="animate-pulse"/> {trendingMsg}</motion.div>}</AnimatePresence>
 
       <Map ref={mapRef} initialViewState={{ longitude: 20.1683, latitude: 41.1533, zoom: 7, pitch: 45 }} maxBounds={ALBANIA_BOUNDS} mapStyle={MAP_STYLE} attributionControl={false} onMove={updateMapBounds} onLoad={updateMapBounds}>
+        
+        <Source id="lasers" type="geojson" data={lineData}>
+          <Layer id="laser-lines" type="line" paint={{ 'line-color': ['get', 'color'], 'line-width': 2.5, 'line-opacity': 0.8, 'line-dasharray': [2, 2] }} />
+        </Source>
+
         {clusters.map(cluster => {
           const [longitude, latitude] = cluster.geometry.coordinates;
           const { cluster: isCluster, point_count: ptCount } = cluster.properties as any;
@@ -313,10 +359,9 @@ function MapEngine() {
           const mood = getMoodStyle(pulse.energy_value);
           return <Marker key={pulse.id} longitude={longitude} latitude={latitude} anchor="bottom"><div className="flex flex-col items-center cursor-pointer" onClick={(e) => { e.stopPropagation(); handlePlayPulse(pulse); }}><span className="text-2xl mb-1">{pulse.category}</span><div className="w-4 h-4 rounded-full border-2 border-white" style={{ backgroundColor: mood.color, boxShadow: `0 0 15px ${mood.color}` }} /></div></Marker>;
         })}
-        {!hasSeenCat && <Marker longitude={catPos.lng} latitude={catPos.lat} anchor="bottom"><div onClick={(e) => { e.stopPropagation(); setShowCatModal(true); setHasSeenCat(true); }} className="cursor-pointer text-xl drop-shadow-neon hover:scale-125 transition-transform">🐈‍⬛</div></Marker>}
+        {!hasSeenCat && <Marker longitude={catPos.lng} latitude={catPos.lat} anchor="bottom"><div onClick={(e) => { e.stopPropagation(); setShowCatModal(true); setHasSeenCat(true); }} className="cursor-pointer text-xl drop-shadow-neon hover:scale-125 transition-transform">🐈‍</div></Marker>}
       </Map>
 
-      {/*  */}
       <AnimatePresence>
         {activePulse && !showGlobalList && !activeReport && (
           <motion.div initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 50, opacity: 0 }} className="absolute bottom-32 left-1/2 -translate-x-1/2 z-50 w-11/12 max-w-sm bg-peaky-charcoal/95 backdrop-blur-xl border border-peaky-steel p-4 rounded-3xl flex items-center gap-4 shadow-2xl">
@@ -338,7 +383,6 @@ function MapEngine() {
         )}
       </AnimatePresence>
 
-      {/* */}
       <AnimatePresence>{activeReport && (
         <motion.div initial={{ y: 50, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 50, opacity: 0 }} className="absolute bottom-32 left-1/2 -translate-x-1/2 z-50 w-11/12 max-w-sm bg-peaky-charcoal/95 backdrop-blur-xl border border-peaky-steel p-5 rounded-3xl text-center shadow-2xl">
           <button onClick={() => setActiveReport(null)} className="absolute top-4 right-4 text-gray-500"><X/></button>
@@ -348,7 +392,7 @@ function MapEngine() {
             <button onClick={() => handleGiveRespect(activeReport.id)} className={`flex-1 py-3 rounded-2xl border flex flex-col items-center ${respectedPulses.includes(activeReport.id) ? 'bg-green-500/10 border-green-500/30 text-green-500 cursor-not-allowed' : 'bg-black border-peaky-steel text-gray-300'}`}><CheckCircle2 size={24}/><span className="text-xs font-bold mt-1">Konfirmo (x{activeReport.respect_count})</span></button>
             <button onClick={() => handleDenyReport(activeReport)} className={`flex-1 py-3 rounded-2xl border flex flex-col items-center ${deniedReports.includes(activeReport.id) ? 'bg-red-500/10 border-red-500/30 text-red-500 cursor-not-allowed' : 'bg-black border-peaky-steel text-gray-300'}`}><XCircle size={24}/><span className="text-xs font-bold mt-1">S'ka Gjë ({activeReport.deny_count || 0}/5)</span></button>
           </div>
-          {myPulses.includes(activeReport.id) && <button onClick={(e) => { e.stopPropagation(); handleDeleteMyPulse(activeReport.id, ''); }} className="mt-4 text-red-500 text-xs flex items-center justify-center gap-1 w-full bg-red-500/10 py-2 rounded-xl"><Trash2 size={14}/> Fshi Raportimin Tim</button>}
+          {myPulses.includes(activeReport.id) && <button onClick={(e) => { e.stopPropagation(); handleDeleteMyPulse(activeReport.id, ''); }} className="mt-4 text-red-500 text-xs flex items-center justify-center gap-1 w-full bg-red-500/10 py-2 rounded-xl hover:bg-red-500/20 transition-all"><Trash2 size={14}/> Fshi Raportimin Tim</button>}
         </motion.div>
       )}</AnimatePresence>
 
