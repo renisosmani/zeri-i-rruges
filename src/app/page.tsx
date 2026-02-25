@@ -81,6 +81,7 @@ function MapEngine() {
   const [zoom, setZoom] = useState(7);
   
   const [audioDuration, setAudioDuration] = useState<number | null>(null);
+  const [deniedReports, setDeniedReports] = useState<string[]>([]);
   const [uploadStep, setUploadStep] = useState<'idle' | 'recording' | 'category' | 'uploading'>('idle');
   const [myPulses, setMyPulses] = useState<string[]>([]); 
   const [respectedPulses, setRespectedPulses] = useState<string[]>([]);
@@ -127,8 +128,10 @@ function MapEngine() {
   useEffect(() => {
     setMyPulses(JSON.parse(localStorage.getItem('myPulses') || '[]'));
     setRespectedPulses(JSON.parse(localStorage.getItem('respectedPulses') || '[]'));
+    setDeniedReports(JSON.parse(localStorage.getItem('deniedReports') || '[]'));
     
     const fetchPulses = async () => {
+    
       const yesterday = new Date(Date.now() - MAX_AGE_MS).toISOString();
       const { data } = await supabase.from('pulses').select('*').gte('created_at', yesterday).order('created_at', { ascending: false });
       if (data) {
@@ -201,7 +204,7 @@ function MapEngine() {
     else { isAutoPlayRef.current = false; setIsAutoPlayingState(false); setActivePulse(null); }
   };
 
-  const handleQuickReport = async (type: '🚨' | '🚗') => {
+  const handleQuickReport = async (type: '👮' | '🚗') => {
     let lat = 41.3275; let lng = 19.8187;
     try {
       const pos = await new Promise<GeolocationPosition>((res, rej) => {
@@ -222,10 +225,25 @@ function MapEngine() {
   };
 
   // Funksioni per "S'ka Polici / S'ka Trafik"
+
   const handleDenyReport = async (pulse: Pulse) => {
+    
+    if (deniedReports.includes(pulse.id)) {
+      alert("Ju keni votuar tashmë për këtë raportim!");
+      return;
+    }
+
     const newDenyCount = (pulse.deny_count || 0) + 1;
+
+    
+    const newDeniedList = [...deniedReports, pulse.id];
+    setDeniedReports(newDeniedList);
+    localStorage.setItem('deniedReports', JSON.stringify(newDeniedList));
+
     if (newDenyCount >= 5) {
+
       // 5 raporte false = Fshihet automatikisht
+
       await supabase.from('pulses').delete().eq('id', pulse.id);
       setActiveReport(null);
       alert("Raportimi u fshi nga harta (5 raporte false).");
@@ -332,7 +350,7 @@ function MapEngine() {
             return (
               <Marker key={pulse.id} longitude={longitude} latitude={latitude} anchor="bottom">
                 <motion.div whileHover={{ scale: 1.2 }} onClick={() => setActiveReport(pulse)}
-                  className={`cursor-pointer text-4xl drop-shadow-[0_0_20px_${pulse.category === '🚨' ? 'rgba(239,68,68,0.8)' : 'rgba(245,158,11,0.8)'}] ${pulse.category === '🚨' ? 'animate-pulse' : ''}`}>
+                  className={`cursor-pointer text-4xl drop-shadow-[0_0_20px_${pulse.category === '👮' ? 'rgba(239,68,68,0.8)' : 'rgba(245,158,11,0.8)'}] ${pulse.category === '👮' ? 'animate-pulse' : ''}`}>
                   {pulse.category}
                 </motion.div>
               </Marker>
@@ -370,7 +388,7 @@ function MapEngine() {
 
             <div className="text-5xl mb-2 drop-shadow-lg">{activeReport.category}</div>
             <h2 className="text-white text-xl font-bold mb-1">
-              {activeReport.category === '🚨' ? 'Raportim për Polici' : 'Raportim për Trafik'}
+              {activeReport.category === '👮' ? 'Raportim për Polici' : 'Raportim për Trafik'}
             </h2>
             
             <div className="flex items-center gap-1 text-peaky-gold text-sm font-mono mb-6 bg-black/40 px-3 py-1.5 rounded-lg">
@@ -384,7 +402,14 @@ function MapEngine() {
                 <span className="text-[10px] opacity-70">x{activeReport.respect_count} njerëz</span>
               </button>
 
-              <button onClick={() => handleDenyReport(activeReport)} className="flex-1 py-3 rounded-2xl border bg-peaky-black border-peaky-steel text-gray-300 hover:border-red-500 hover:bg-red-500/10 hover:text-red-400 flex flex-col items-center justify-center transition-all">
+             <button 
+                onClick={() => handleDenyReport(activeReport)} 
+                className={`flex-1 py-3 rounded-2xl border flex flex-col items-center justify-center transition-all ${
+                  deniedReports.includes(activeReport.id) 
+                    ? 'bg-red-500/10 border-red-500/30 text-red-500 cursor-not-allowed' 
+                    : 'bg-peaky-black border-peaky-steel text-gray-300 hover:border-red-500 hover:bg-red-500/10 hover:text-red-400'
+                }`}
+              >
                 <XCircle size={24} className="mb-1" />
                 <span className="font-bold text-sm">S'ka Gjë</span>
                 <span className="text-[10px] opacity-70">{activeReport.deny_count || 0}/5 për fshirje</span>
@@ -490,7 +515,7 @@ function MapEngine() {
           )}
         </div>
         <div className="flex flex-col gap-2">
-          <motion.button whileTap={{ scale: 0.9 }} onClick={() => handleQuickReport('🚨')} className="w-12 h-12 bg-blue-600 border-2 border-white rounded-full flex items-center justify-center text-white shadow-lg"><AlertTriangle size={18} /></motion.button>
+          <motion.button whileTap={{ scale: 0.9 }} onClick={() => handleQuickReport('👮')} className="w-12 h-12 bg-blue-600 border-2 border-white rounded-full flex items-center justify-center text-white shadow-lg"><AlertTriangle size={18} /></motion.button>
           <motion.button whileTap={{ scale: 0.9 }} onClick={() => handleQuickReport('🚗')} className="w-12 h-12 bg-orange-500 border-2 border-white rounded-full flex items-center justify-center text-white shadow-lg"><Car size={18} /></motion.button>
         </div>
       </div>
